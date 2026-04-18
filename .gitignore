@@ -43,3 +43,11 @@
 # CMake build directories
 build/
 dbuild/
+
+
+# Example run artifacts (committed elsewhere if needed)
+simple_fhetch_example_simple/
+epoch_fhetch_example_epoch/
+
+# OpenFHE install prefix (set by Makefile)
+vendor/lib/

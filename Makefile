@@ -134,18 +134,20 @@ build-openfhe-release: ## Build and install OpenFHE (Release)
 
 ##@ Library Build
 
-config-fhetch: ## Configure the fhetch library (Debug, requires OpenFHE built)
+config-fhetch: ## Configure the fhetch library + examples (Debug, requires OpenFHE built)
 	$(call set-build-config,Debug,dbuild)
 	cmake -S $(CURDIR) -B $(CURDIR)/dbuild \
 		-DCMAKE_BUILD_TYPE=Debug \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
+		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
 
-config-fhetch-release: ## Configure the fhetch library (Release, requires OpenFHE built)
+config-fhetch-release: ## Configure the fhetch library + examples (Release, requires OpenFHE built)
 	$(call set-build-config,Release,build)
 	cmake -S $(CURDIR) -B $(CURDIR)/build \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
+		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
 
 ##@ Combined Targets
@@ -163,6 +165,18 @@ build-release: build-openfhe-release ## Build everything (Release)
 	cmake --build build -j $(NUM_CPUS) --config Release
 
 release: config-release build-release ## Shortcut: configure + build everything (Release)
+
+##@ Examples
+
+test-simple-fhetch: build ## Record + replay the FHETCH-only simple example (Debug)
+	$(call set-build-config,Debug,dbuild)
+	@rm -rf simple_fhetch_example_simple
+	$(BUILD_DIR)/examples/simple_fhetch
+
+test-simple-fhetch-release: build-release ## Record + replay the FHETCH-only simple example (Release)
+	$(call set-build-config,Release,build)
+	@rm -rf simple_fhetch_example_simple
+	$(BUILD_DIR)/examples/simple_fhetch
 
 ##@ Installation
 
