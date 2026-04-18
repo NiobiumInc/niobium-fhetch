@@ -18,6 +18,7 @@
 #include <iostream>
 #include <map>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace niobium::fhetch {
 
@@ -29,6 +30,21 @@ static std::atomic<uintptr_t> next_address_{0};
 
 static uintptr_t alloc_address() {
     return next_address_.fetch_add(1, std::memory_order_relaxed);
+}
+
+// ----------------------------------------------------------------------------
+// Address -> modulus map. Populated as sr_* instructions are emitted; used by
+// sync_fhetch_state_to_compiler() to resolve a modulus for each tagged
+// single-residue input before replay().
+// ----------------------------------------------------------------------------
+
+static std::unordered_map<uintptr_t, uint64_t>& address_modulus_map() {
+    static std::unordered_map<uintptr_t, uint64_t> map;
+    return map;
+}
+
+static void remember_modulus(uintptr_t a, uint64_t q) {
+    address_modulus_map().emplace(a, q);  // first write wins
 }
 
 // ============================================================================
@@ -508,6 +524,9 @@ void save_probe_outputs() {
 
 Polynomial sr_addp(const Polynomial& a, const Polynomial& b, uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(b.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_addp " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " + addr(b.impl()->address) +
          ", " + midx(q));
@@ -516,6 +535,8 @@ Polynomial sr_addp(const Polynomial& a, const Polynomial& b, uint64_t q) {
 
 Polynomial sr_addps(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_addps " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " +
          std::to_string(s.impl()->int_value) + ", " + midx(q));
@@ -524,6 +545,8 @@ Polynomial sr_addps(const Polynomial& a, const Scalar& s, uint64_t q) {
 
 Polynomial sr_addps_coeff(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a, Format::Coefficient);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_addps_coeff " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " +
          std::to_string(s.impl()->int_value) + ", " + midx(q));
@@ -532,6 +555,8 @@ Polynomial sr_addps_coeff(const Polynomial& a, const Scalar& s, uint64_t q) {
 
 Polynomial sr_negp(const Polynomial& a, uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_negp " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " + midx(q));
     return result;
@@ -539,6 +564,9 @@ Polynomial sr_negp(const Polynomial& a, uint64_t q) {
 
 Polynomial sr_subp(const Polynomial& a, const Polynomial& b, uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(b.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_subp " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " + addr(b.impl()->address) +
          ", " + midx(q));
@@ -547,6 +575,8 @@ Polynomial sr_subp(const Polynomial& a, const Polynomial& b, uint64_t q) {
 
 Polynomial sr_subps(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_subps " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " +
          std::to_string(s.impl()->int_value) + ", " + midx(q));
@@ -555,6 +585,8 @@ Polynomial sr_subps(const Polynomial& a, const Scalar& s, uint64_t q) {
 
 Polynomial sr_subps_coeff(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a, Format::Coefficient);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_subps_coeff " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " +
          std::to_string(s.impl()->int_value) + ", " + midx(q));
@@ -563,6 +595,9 @@ Polynomial sr_subps_coeff(const Polynomial& a, const Scalar& s, uint64_t q) {
 
 Polynomial sr_mulp(const Polynomial& a, const Polynomial& b, uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(b.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_mulp " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " + addr(b.impl()->address) +
          ", " + midx(q));
@@ -571,6 +606,8 @@ Polynomial sr_mulp(const Polynomial& a, const Polynomial& b, uint64_t q) {
 
 Polynomial sr_mulps(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_mulps " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " +
          std::to_string(s.impl()->int_value) + ", " + midx(q));
@@ -579,6 +616,8 @@ Polynomial sr_mulps(const Polynomial& a, const Scalar& s, uint64_t q) {
 
 Polynomial sr_ntt(const Polynomial& a, uint64_t q) {
     auto result = make_result(a, Format::Evaluation);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_ntt " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " + midx(q));
     return result;
@@ -586,6 +625,8 @@ Polynomial sr_ntt(const Polynomial& a, uint64_t q) {
 
 Polynomial sr_intt(const Polynomial& a, uint64_t q) {
     auto result = make_result(a, Format::Coefficient);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_intt " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " + midx(q));
     return result;
@@ -596,6 +637,8 @@ Polynomial sr_permute(const Polynomial& a,
                       const std::vector<int>& /*signs*/,
                       uint64_t q) {
     auto result = make_result(a);
+    remember_modulus(a.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_permute " + addr(result.impl()->address) + ", " +
          addr(a.impl()->address) + ", " + midx(q));
     return result;
@@ -993,3 +1036,106 @@ bool load_mrp_array_json(MRPArray& /*arr*/, const std::filesystem::path& /*file*
 }
 
 }  // namespace niobium::fhetch
+
+// ============================================================================
+// Internal: sync tagged inputs/outputs to the Compiler so replay() can find
+// them. Called from Compiler::replay() before populating the simulator.
+// ============================================================================
+
+namespace niobium::detail {
+
+void sync_fhetch_state_to_compiler() {
+    using namespace niobium::fhetch;
+    auto& cc = niobium::compiler();
+    const auto& mod_map = address_modulus_map();
+
+    auto data_or_zeros = [](const Polynomial& p) {
+        if (!p.impl()->int_data.empty()) return p.impl()->int_data;
+        return std::vector<uint64_t>(p.ring_dimension(), 0);
+    };
+
+    auto try_push_poly = [&](const std::string& name, const Polynomial& p) {
+        if (!p.is_valid()) return;
+        auto it = mod_map.find(p.impl()->address);
+        if (it == mod_map.end()) return;  // never used in a modulus-bearing op
+        cc.store_input_element(name, p.impl()->address, it->second,
+                               data_or_zeros(p));
+    };
+
+    // ---- Inputs ----
+    for (const auto& e : input_registry()) {
+        switch (e.kind) {
+        case InputEntry::POLY:
+            try_push_poly(e.name, e.poly);
+            break;
+        case InputEntry::MRP_KIND:
+            if (e.mrp.is_valid()) {
+                for (auto q : e.mrp.base()) {
+                    const auto& res = e.mrp[q];
+                    if (!res.is_valid()) continue;
+                    cc.store_input_element(e.name, res.impl()->address, q,
+                                           data_or_zeros(res));
+                }
+            }
+            break;
+        case InputEntry::MRPA:
+            if (e.mrpa.is_valid()) {
+                for (size_t i = 0; i < e.mrpa.length(); ++i) {
+                    const auto& m = e.mrpa[i];
+                    for (auto q : m.base()) {
+                        const auto& res = m[q];
+                        if (!res.is_valid()) continue;
+                        cc.store_input_element(e.name, res.impl()->address, q,
+                                               data_or_zeros(res));
+                    }
+                }
+            }
+            break;
+        case InputEntry::SRPA:
+            if (e.srpa.is_valid()) {
+                for (size_t i = 0; i < e.srpa.length(); ++i)
+                    try_push_poly(e.name, e.srpa[i]);
+            }
+            break;
+        }
+    }
+
+    // ---- Outputs ----
+    auto try_push_output = [&](const std::string& name, const Polynomial& p) {
+        if (!p.is_valid()) return;
+        auto it = mod_map.find(p.impl()->address);
+        uint64_t q = (it == mod_map.end()) ? 0 : it->second;
+        cc.store_output_probe(name, p.impl()->address, q);
+    };
+
+    for (const auto& e : probe_registry()) {
+        switch (e.kind) {
+        case ProbeEntry::POLY:
+            try_push_output(e.name, e.poly);
+            break;
+        case ProbeEntry::MRP_KIND:
+            if (e.mrp.is_valid()) {
+                for (auto q : e.mrp.base())
+                    cc.store_output_probe(e.name, e.mrp[q].impl()->address, q);
+            }
+            break;
+        case ProbeEntry::MRPA:
+            if (e.mrpa.is_valid()) {
+                for (size_t i = 0; i < e.mrpa.length(); ++i) {
+                    const auto& m = e.mrpa[i];
+                    for (auto q : m.base())
+                        cc.store_output_probe(e.name, m[q].impl()->address, q);
+                }
+            }
+            break;
+        case ProbeEntry::SRPA:
+            if (e.srpa.is_valid()) {
+                for (size_t i = 0; i < e.srpa.length(); ++i)
+                    try_push_output(e.name, e.srpa[i]);
+            }
+            break;
+        }
+    }
+}
+
+}  // namespace niobium::detail

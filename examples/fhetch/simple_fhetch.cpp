@@ -17,12 +17,10 @@
 //      MRPA dot product.
 //   4. Running the bundled FHETCH simulator via Compiler::replay().
 //
-// The client's replay path is designed around inputs that arrive through the
-// OpenFHE auto-facade (tag_input<Ciphertext>), so this FHETCH-only flow will
-// warn about uninitialized read addresses at replay time — the point of the
-// example is to produce a .fhetch trace from pure FHETCH API calls. The trace
-// itself is the primary artifact (submitted to the Niobium compilation server)
-// and can be inspected at the path printed at the end.
+// Tagged inputs / outputs feed through to the simulator: addresses covered
+// by fhetch::tag_input get populated with the tagged polynomial's data (or
+// zeros for MRP residues constructed via MRP(base, N)), and addresses covered
+// by fhetch::tag_output show up under "outputs" in fhetch_replay_outputs.json.
 //
 
 #include "niobium/fhetch_api.h"
@@ -153,9 +151,6 @@ int main(int argc, char* argv[]) {
     }
 
     // ---- Run the functional simulator ----
-    // Uninitialized-read warnings are expected: in a FHETCH-only flow the
-    // client doesn't have a captured-input pathway to push values into the
-    // simulator's memory. The trace file is still the primary artifact.
     niobium::compiler().replay();
 
     auto out_dir = niobium::compiler().get_program_directory();

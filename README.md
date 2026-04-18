@@ -246,7 +246,7 @@ This repository ships examples that exercise the FHETCH API directly — no Open
 |--------------------------------|--------------|
 | `examples/fhetch/simple_fhetch.cpp` | Single-residue ops (`sr_addp`, `sr_mulp`, `sr_mulps`, `sr_negp`, `sr_ntt`/`sr_intt`), multi-residue ops (`mr_addp`, `mr_mulp`, `mr_ntt`/`mr_intt`), and an MRPA dot product. Emits a `.fhetch` trace + replay manifest + replay outputs. |
 
-The client's replay path was designed around inputs delivered via the OpenFHE auto-facade (`Compiler::tag_input<Ciphertext>`), so these FHETCH-only flows will print uninitialized-read warnings at replay time — the primary artifact is the trace file itself, which is what would be submitted to the Niobium compilation server.
+Under the hood, `fhetch::tag_input` / `tag_output` wire into the Compiler's captured-inputs / output-probes the same way the OpenFHE auto-facade (`Compiler::tag_input<Ciphertext>`) does, so `Compiler::replay()` populates the simulator's memory directly and writes the computed output values to `fhetch_replay_outputs.json`.
 
 Run:
 

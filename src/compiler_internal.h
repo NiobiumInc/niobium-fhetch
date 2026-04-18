@@ -46,4 +46,11 @@ uintptr_t niobium_precompute_probe_already_mapped_count();
 /// that point. Used to carve out fixed ID ranges for inputs vs. keys.
 void reserve_fhetch_addresses(uint64_t next_addr);
 
+/// Push any tagged FHETCH inputs/outputs (registered via
+/// niobium::fhetch::tag_input / tag_output) into the Compiler's captured
+/// inputs / output-probe maps, so Compiler::replay() populates the
+/// simulator from pure-FHETCH flows the same way it does from the
+/// OpenFHE auto-facade path.
+void sync_fhetch_state_to_compiler();
+
 }  // namespace niobium::detail
