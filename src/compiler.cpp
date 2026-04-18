@@ -441,6 +441,11 @@ bool Compiler::replay() {
     // downstream children inherit correctly during the propagation pass.
     impl_->simulator->prematerialize_zero_inits();
 
+    // Pull in any state registered via the FHETCH-only tag_input / tag_output
+    // path (fhetch_api.cpp). For OpenFHE flows this is a no-op — the
+    // auto-facade has already populated captured_inputs / captured_outputs.
+    niobium::detail::sync_fhetch_state_to_compiler();
+
     // Compute the "live-in" set: addresses read before being written in the trace.
     // Only these addresses need input data; addresses that are written first
     // get their values from the simulation itself.
