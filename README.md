@@ -238,6 +238,22 @@ End users do **not** call `fhetch_api.h` functions directly — they are invoked
 
 For OpenFHE-specific instrumentation and full end-to-end examples (client / server / decrypt splits, CKKS bootstrap, ciphertext rehydration), see [`niobium-client`](https://github.com/NiobiumInc/niobium-client).
 
+### FHETCH-only examples
+
+This repository ships examples that exercise the FHETCH API directly — no OpenFHE crypto context in the user code, just polynomials, scalars, MRPs, and MRPAs driven through the `fhetch::` free functions. They are built when `NIOBIUM_FHETCH_WITH_EXAMPLES=ON` (or via `make test-simple-fhetch-release`).
+
+| Example                        | What it does |
+|--------------------------------|--------------|
+| `examples/fhetch/simple_fhetch.cpp` | Single-residue ops (`sr_addp`, `sr_mulp`, `sr_mulps`, `sr_negp`, `sr_ntt`/`sr_intt`), multi-residue ops (`mr_addp`, `mr_mulp`, `mr_ntt`/`mr_intt`), and an MRPA dot product. Emits a `.fhetch` trace + replay manifest + replay outputs. |
+
+The client's replay path was designed around inputs delivered via the OpenFHE auto-facade (`Compiler::tag_input<Ciphertext>`), so these FHETCH-only flows will print uninitialized-read warnings at replay time — the primary artifact is the trace file itself, which is what would be submitted to the Niobium compilation server.
+
+Run:
+
+```bash
+make test-simple-fhetch-release
+```
+
 ## Architecture notes
 
 - **Thin, scheme-agnostic recording.** The library records FHETCH Polynomial IR only. Scheme-level semantics (CKKS vs BFV vs BGV, which polynomial operations a given ciphertext op lowers to) are the responsibility of the host integration and its FHE backend.

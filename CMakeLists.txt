@@ -165,3 +165,13 @@ if(WITH_FHETCH_SIM)
     install(TARGETS fhetch_sim
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
+
+# ==============================================================================
+# Examples (optional)
+# ==============================================================================
+
+option(NIOBIUM_FHETCH_WITH_EXAMPLES "Build FHETCH examples" OFF)
+
+if(NIOBIUM_FHETCH_WITH_EXAMPLES)
+    add_subdirectory(examples)
+endif()
