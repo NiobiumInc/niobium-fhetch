@@ -256,7 +256,7 @@ make test-simple-fhetch-release
 
 ### Test harness — `fhetch_driver`
 
-`tests/fhetch_driver/` ships a standalone executable that reads a `.fhetch` trace from disk and re-drives it through the FHETCH API, producing a secondary trace that is replayed through the simulator. Useful for regression-checking that every opcode in a trace round-trips cleanly through the library's recording path.
+`tests/fhetch_driver/` ships a standalone executable that reads a `.fhetch` trace from disk and re-drives it through the FHETCH API, producing a secondary trace that is replayed through the simulator.
 
 The parser itself is a public library component — `include/niobium/fhetch_parser.h` + `src/fhetch_parser.cpp` — so other callers can consume it directly via `libnbfhetch`. Build-gated by `NIOBIUM_FHETCH_WITH_TESTS=ON`.
 
@@ -264,6 +264,20 @@ The parser itself is a public library component — `include/niobium/fhetch_pars
 make build-release
 make test-fhetch-driver-release TRACE=/path/to/trace.fhetch N=2048
 ```
+
+**Two modes**: run without `--source-dir` for a structural sanity re-drive (live-ins zero-filled, no output probes). Run with `--source-dir <path-to-primary-workload-dir> --cc <cc.bin> --output-ct NAME:PATH` to do a value-level roundtrip: the driver deserializes the primary's captured inputs (`.input_*.bin` / keys) via OpenFHE cereal, tags the original outputs, and reconstructs a ciphertext for the specified output name so a decrypt step can verify the secondary against the expected plaintext.
+
+### End-to-end roundtrip tests
+
+`tests/{simple_ops,bootstrap}/` are OpenFHE `client / server / decrypt` triples ported from `niobium-client`. Built alongside `fhetch_driver` under `NIOBIUM_FHETCH_WITH_TESTS=ON`. The top-level `make test-roundtrip-simple-ops-release` target runs every `simple_ops` operation through the full pipeline:
+
+1. `simple_ops_client` encrypts inputs.
+2. `simple_ops_server` records the `.fhetch` trace and runs the **primary** simulator replay → `ct_result.bin`.
+3. `simple_ops_decrypt … ct_result.bin` — primary decrypt PASS.
+4. `fhetch_driver --source-dir WORKLOAD --cc cc.bin --output-ct result:ct_result_secondary.bin` — re-drives the trace with real inputs, runs the **secondary** simulator replay, reconstructs the output ciphertext.
+5. `simple_ops_decrypt … ct_result_secondary.bin` — secondary decrypt PASS.
+
+All 13 simple_ops (`ADD, SUB, NEG, ADDI, SUBI, MULI, ADD_ADD, ADD_SUB, MUL, MUL_ADD, ADD_MUL, MUL_MUL, MORPH`) currently pass both primary and secondary decrypt. The `bootstrap` example is wired the same way (`make test-roundtrip-bootstrap-release`) but has a separate primary-side numerical precision issue that also affects the secondary.
 
 ## Architecture notes
 

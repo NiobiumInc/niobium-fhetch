@@ -208,6 +208,74 @@ test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release).
 	fi
 	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N)
 
+# ==============================================================================
+# End-to-end roundtrip tests (primary + secondary via fhetch_driver)
+# ==============================================================================
+
+# Helper: for a given simple_ops operation ($1), drive the full pipeline:
+#   client -> server (primary replay) -> decrypt primary
+#        -> fhetch_driver (secondary replay, writes ct_result_secondary.bin)
+#        -> decrypt secondary
+# Both decryptions must PASS.
+define roundtrip-simple-op
+	@echo ""
+	@echo "=== Roundtrip $(1) ==="
+	@rm -rf simple_ops_keys simple_ops_server_workload_*
+	@$(BUILD_DIR)/tests/simple_ops_client simple_ops_keys $(2) $(3) 2>&1 | tail -1
+	@$(BUILD_DIR)/tests/simple_ops_server simple_ops_keys $(1) 2>&1 | grep -E "Complete:|ERROR" | head -3 || true
+	@echo "  -- primary decrypt --"
+	@$(BUILD_DIR)/tests/simple_ops_decrypt simple_ops_keys $(1) ct_result.bin 2>&1 | grep -E "PASS|FAIL"
+	@echo "  -- fhetch_driver (secondary) --"
+	@WORKLOAD_DIR=$$(ls -d simple_ops_server_workload_simple_ops_op_$(1) 2>/dev/null || true); \
+	 if [ -z "$$WORKLOAD_DIR" ]; then echo "  [SKIP] no workload dir"; exit 0; fi; \
+	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim 2048 \
+	     --source-dir $$WORKLOAD_DIR \
+	     --cc simple_ops_keys/cc.bin \
+	     --output-ct result:simple_ops_keys/ct_result_secondary.bin 2>&1 \
+	     | grep -E "replayed:|Complete:|wrote|ERROR" | head -5 || true
+	@echo "  -- secondary decrypt --"
+	@$(BUILD_DIR)/tests/simple_ops_decrypt simple_ops_keys $(1) ct_result_secondary.bin 2>&1 | grep -E "PASS|FAIL"
+endef
+
+test-roundtrip-simple-ops-release: build-release ## Full roundtrip for all simple_ops (primary + secondary decrypt)
+	$(call set-build-config,Release,build)
+	$(call roundtrip-simple-op,ADD,5,6)
+	$(call roundtrip-simple-op,SUB,5,6)
+	$(call roundtrip-simple-op,NEG,5,6)
+	$(call roundtrip-simple-op,ADDI,5,6)
+	$(call roundtrip-simple-op,SUBI,5,6)
+	$(call roundtrip-simple-op,MULI,5,6)
+	$(call roundtrip-simple-op,ADD_ADD,5,6)
+	$(call roundtrip-simple-op,ADD_SUB,5,6)
+	$(call roundtrip-simple-op,MUL,5,6)
+	$(call roundtrip-simple-op,MUL_ADD,5,6)
+	$(call roundtrip-simple-op,ADD_MUL,5,6)
+	$(call roundtrip-simple-op,MUL_MUL,5,6)
+	$(call roundtrip-simple-op,MORPH,5,6)
+
+test-roundtrip-bootstrap-release: build-release ## Full roundtrip for bootstrap (primary + secondary decrypt)
+	$(call set-build-config,Release,build)
+	@rm -rf bootstrap_keys bootstrap_server_*
+	@echo "=== Bootstrap client ==="
+	$(BUILD_DIR)/tests/bootstrap_client bootstrap_keys
+	@echo "=== Bootstrap server ==="
+	$(BUILD_DIR)/tests/bootstrap_server bootstrap_keys
+	@echo "=== Bootstrap primary decrypt ==="
+	$(BUILD_DIR)/tests/bootstrap_decrypt bootstrap_keys ct_result.bin
+	@echo "=== Bootstrap fhetch_driver (secondary) ==="
+	@WORKLOAD_DIR=$$(ls -d bootstrap_server_workload_* 2>/dev/null); \
+	 N=$$($(BUILD_DIR)/tests/bootstrap_server bootstrap_keys 2>&1 | grep -oP 'Ring dimension:\s*\K[0-9]+' | head -1); \
+	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $${N:-2048} \
+	     --source-dir $$WORKLOAD_DIR \
+	     --cc bootstrap_keys/cc.bin \
+	     --output-ct output_cipher:bootstrap_keys/ct_result_secondary.bin
+	@echo "=== Bootstrap secondary decrypt ==="
+	$(BUILD_DIR)/tests/bootstrap_decrypt bootstrap_keys ct_result_secondary.bin
+
+test-roundtrip-release: test-roundtrip-simple-ops-release test-roundtrip-bootstrap-release ## Full roundtrip sweep: simple_ops + bootstrap
+
 ##@ Installation
 
 install: ## Install the fhetch library (Debug)

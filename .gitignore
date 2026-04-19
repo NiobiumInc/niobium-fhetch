@@ -54,3 +54,7 @@ vendor/lib/
 
 # fhetch_driver test-harness output cache dirs
 fhetch_driver_source_*/
+simple_ops_keys/
+bootstrap_keys/
+simple_ops_server_*/
+bootstrap_server_*/

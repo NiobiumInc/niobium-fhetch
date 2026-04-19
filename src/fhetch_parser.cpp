@@ -26,6 +26,8 @@
 
 #include "niobium/fhetch_parser.h"
 #include "niobium/fhetch_api.h"
+#include "niobium/compiler.h"
+#include "compiler_internal.h"
 
 #include <algorithm>
 #include <cctype>
@@ -150,18 +152,41 @@ OpCode lookup_opcode(const std::string& s) {
 struct Driver {
     uint64_t ring_dim;
     DriveStats& stats;
+    const DriveInputs& inputs;
+    const DriveOutputs& outputs;
 
     // Input-file address -> Polynomial
     std::unordered_map<uint64_t, Polynomial> polys;
 
-    Driver(uint64_t rd, DriveStats& s) : ring_dim(rd), stats(s) {}
+    Driver(uint64_t rd, DriveStats& s,
+           const DriveInputs& in, const DriveOutputs& out)
+        : ring_dim(rd), stats(s), inputs(in), outputs(out) {}
 
     // Get-or-create a source polynomial. Reads before writes are treated as
-    // live-in zero-initialized inputs and tagged via fhetch::tag_input() so
-    // replay() populates simulator memory for them.
+    // live-in inputs: if the caller supplied real values for the address via
+    // DriveInputs, we use those AND go straight to the Compiler's
+    // store_input_element() so the known (values, modulus) pair lands in
+    // captured_inputs at the Polynomial's synthetic FHETCH address. If no
+    // caller-provided data is available, fall back to a zero-filled
+    // placeholder tagged via the normal tag_input() path — whose sync hook
+    // infers the modulus from the first sr_* op that uses the address.
     Polynomial& get_or_create_src(uint64_t file_addr) {
         auto it = polys.find(file_addr);
         if (it != polys.end()) return it->second;
+
+        auto in_it = inputs.data.find(file_addr);
+        if (in_it != inputs.data.end() && !in_it->second.values.empty()) {
+            auto p = Polynomial::from_data(in_it->second.values, ring_dim,
+                                          Format::Evaluation);
+            niobium::compiler().store_input_element(
+                "in_" + std::to_string(file_addr),
+                niobium::detail::polynomial_address(p),
+                in_it->second.modulus,
+                in_it->second.values);
+            stats.inputs_materialized++;
+            auto [ins, _] = polys.emplace(file_addr, std::move(p));
+            return ins->second;
+        }
         auto p = Polynomial::zeros(ring_dim, Format::Evaluation);
         tag_input("in_" + std::to_string(file_addr), p);
         auto [ins, _] = polys.emplace(file_addr, std::move(p));
@@ -170,8 +195,38 @@ struct Driver {
 
     // Store the FHETCH API's output under the input file's destination
     // address, so later instructions that reference it resolve correctly.
+    // If the caller marked this destination as an output probe via
+    // DriveOutputs, also emit a tag_output() so Compiler::result() can
+    // reconstruct the ciphertext after replay.
+    // Store the FHETCH API's output under the input file's destination
+    // address. Output probes are tagged at the very end of the trace
+    // (finalize_outputs()) so the *final* polynomial at each source-file
+    // address is what gets sent to the simulator — not intermediates from
+    // copy instructions that happen to share the same destination address.
     void put(uint64_t file_dst, Polynomial r) {
         polys[file_dst] = std::move(r);
+    }
+
+    // Called once at end of trace. For each source-file address that the
+    // caller marked as an output probe, tag the *last* Polynomial stored at
+    // that address, ordered by poly_index so the resulting captured_outputs
+    // entry lists addresses in ciphertext-tower order.
+    void finalize_outputs() {
+        if (outputs.map.empty()) return;
+        std::vector<std::pair<uint64_t, DriveOutputs::Tag>> ordered(
+            outputs.map.begin(), outputs.map.end());
+        std::sort(ordered.begin(), ordered.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a.second.name != b.second.name)
+                          return a.second.name < b.second.name;
+                      return a.second.poly_index < b.second.poly_index;
+                  });
+        for (const auto& [file_addr, tag] : ordered) {
+            auto it = polys.find(file_addr);
+            if (it == polys.end()) continue;
+            tag_output(tag.name, it->second);
+            stats.outputs_tagged++;
+        }
     }
 
     // Resolve m=K to the modulus value from the table. Returns 0 if out of
@@ -457,14 +512,16 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
     return false;
 }
 
-bool drive_stream(std::istream& in, uint64_t ring_dim, DriveStats& stats) {
-    Driver drv(ring_dim, stats);
+bool drive_stream(std::istream& in, uint64_t ring_dim, DriveStats& stats,
+                  const DriveInputs& inputs, const DriveOutputs& outputs) {
+    Driver drv(ring_dim, stats, inputs, outputs);
     std::string line;
     int line_num = 0;
     while (std::getline(in, line)) {
         line_num++;
         parse_line(line, line_num, drv);
     }
+    drv.finalize_outputs();
     return stats.instructions_replayed > 0;
 }
 
@@ -472,20 +529,24 @@ bool drive_stream(std::istream& in, uint64_t ring_dim, DriveStats& stats) {
 
 bool parse_and_drive(const std::filesystem::path& path,
                      uint64_t ring_dim,
-                     DriveStats& stats) {
+                     DriveStats& stats,
+                     const DriveInputs& inputs,
+                     const DriveOutputs& outputs) {
     std::ifstream in(path);
     if (!in.is_open()) {
         stats.errors.push_back("failed to open: " + path.string());
         return false;
     }
-    return drive_stream(in, ring_dim, stats);
+    return drive_stream(in, ring_dim, stats, inputs, outputs);
 }
 
 bool parse_and_drive_text(const std::string& text,
                           uint64_t ring_dim,
-                          DriveStats& stats) {
+                          DriveStats& stats,
+                          const DriveInputs& inputs,
+                          const DriveOutputs& outputs) {
     std::istringstream in(text);
-    return drive_stream(in, ring_dim, stats);
+    return drive_stream(in, ring_dim, stats, inputs, outputs);
 }
 
 }  // namespace niobium::fhetch
