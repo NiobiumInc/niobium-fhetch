@@ -21,9 +21,11 @@ using namespace lbcrypto;
 
 int main(int argc, char* argv[]) {
     std::string keyDir = "bootstrap_keys";
+    std::string ct_file = "ct_result.bin";
     if (argc > 1) keyDir = argv[1];
+    if (argc > 2) ct_file = argv[2];
 
-    std::cout << "=== CKKS Bootstrap — Decrypt & Verify ===" << std::endl;
+    std::cout << "=== CKKS Bootstrap — Decrypt & Verify (ct=" << ct_file << ") ===" << std::endl;
     std::cout << "Loading from: " << keyDir << std::endl;
 
     // ---- Load crypto context ----
@@ -38,8 +40,8 @@ int main(int argc, char* argv[]) {
 
     // ---- Load result ciphertext ----
     Ciphertext<DCRTPoly> ct_result;
-    if (!Serial::DeserializeFromFile(keyDir + "/ct_result.bin", ct_result, SerType::BINARY))
-        throw std::runtime_error("Failed to load result ciphertext");
+    if (!Serial::DeserializeFromFile(keyDir + "/" + ct_file, ct_result, SerType::BINARY))
+        throw std::runtime_error("Failed to load result ciphertext: " + ct_file);
 
     // ---- Load depth ----
     usint depth = 0;

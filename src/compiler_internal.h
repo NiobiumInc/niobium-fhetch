@@ -54,3 +54,17 @@ void reserve_fhetch_addresses(uint64_t next_addr);
 void sync_fhetch_state_to_compiler();
 
 }  // namespace niobium::detail
+
+// Forward-declare the opaque Polynomial struct so we can return its
+// synthetic FHETCH address without exposing the full implementation.
+namespace niobium::fhetch { class Polynomial; }
+
+namespace niobium::detail {
+
+/// Retrieve the synthetic FHETCH address assigned to a niobium::fhetch::Polynomial.
+/// Used by translation units (e.g. fhetch_parser.cpp) that need to call
+/// Compiler::store_input_element with the Polynomial's own address without
+/// reaching into PolynomialImpl's internal layout.
+uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p);
+
+}  // namespace niobium::detail

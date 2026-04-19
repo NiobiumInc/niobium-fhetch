@@ -19,11 +19,14 @@ using namespace lbcrypto;
 int main(int argc, char* argv[]) {
     std::string keyDir = "simple_ops_keys";
     std::string operation = "ADD";
+    std::string ct_file = "ct_result.bin";  // override with 3rd arg
 
     if (argc > 1) keyDir = argv[1];
     if (argc > 2) operation = argv[2];
+    if (argc > 3) ct_file = argv[3];
 
-    std::cout << "=== Simple Ops — Decrypt (" << operation << ") ===" << std::endl;
+    std::cout << "=== Simple Ops — Decrypt (" << operation
+              << ", ct=" << ct_file << ") ===" << std::endl;
 
     CryptoContext<DCRTPoly> cc;
     if (!Serial::DeserializeFromFile(keyDir + "/cc.bin", cc, SerType::BINARY))
@@ -34,8 +37,8 @@ int main(int argc, char* argv[]) {
         throw std::runtime_error("Failed to load secret key");
 
     Ciphertext<DCRTPoly> ct_result;
-    if (!Serial::DeserializeFromFile(keyDir + "/ct_result.bin", ct_result, SerType::BINARY))
-        throw std::runtime_error("Failed to load result ciphertext");
+    if (!Serial::DeserializeFromFile(keyDir + "/" + ct_file, ct_result, SerType::BINARY))
+        throw std::runtime_error("Failed to load result ciphertext: " + ct_file);
 
     double a = 0, b = 0;
     {

@@ -44,7 +44,15 @@ static std::unordered_map<uintptr_t, uint64_t>& address_modulus_map() {
 }
 
 static void remember_modulus(uintptr_t a, uint64_t q) {
-    address_modulus_map().emplace(a, q);  // first write wins
+    // Never cache the copy-sentinel modulus (0xFFFFFFFFFFFFFFFF emitted with
+    // m=0 from copy-style sr_addps %d, %s, 0 instructions). It doesn't
+    // describe the polynomial's actual modulus — the real modulus shows up
+    // on the first non-copy op that uses the address.
+    constexpr uint64_t COPY_SENTINEL = 0xFFFFFFFFFFFFFFFFULL;
+    if (q == COPY_SENTINEL) return;
+    auto& m = address_modulus_map();
+    auto it = m.find(a);
+    if (it == m.end()) m.emplace(a, q);  // first *real* write wins
 }
 
 // ============================================================================
@@ -1043,6 +1051,10 @@ bool load_mrp_array_json(MRPArray& /*arr*/, const std::filesystem::path& /*file*
 // ============================================================================
 
 namespace niobium::detail {
+
+uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p) {
+    return p.impl() ? p.impl()->address : static_cast<uintptr_t>(-1);
+}
 
 void sync_fhetch_state_to_compiler() {
     using namespace niobium::fhetch;
