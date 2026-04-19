@@ -182,18 +182,31 @@ test-simple-fhetch-release: build-release ## Record + replay the FHETCH-only sim
 
 # Re-drive a .fhetch trace through the API via tests/fhetch_driver.
 # Pass a trace path as TRACE=/path/to/file.fhetch, ring dim as N=2048.
+# If TRACE is unset, the target runs simple_fhetch first to produce a trace
+# and drives that one — so `make test-fhetch-driver[-release]` works with
+# no arguments.
 TRACE ?=
 N     ?= 2048
 
-test-fhetch-driver: build ## Re-drive a .fhetch trace (Debug). TRACE=<path> N=<ring_dim>
-	$(call set-build-config,Debug,dbuild)
-	@if [ -z "$(TRACE)" ]; then echo "Pass TRACE=/path/to/file.fhetch"; exit 1; fi
-	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $(TRACE) --ring-dim $(N)
+SIMPLE_TRACE := simple_fhetch_example_simple/simple_fhetch_example_simple.fhetch
 
-test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release). TRACE=<path> N=<ring_dim>
+test-fhetch-driver: build ## Re-drive a .fhetch trace (Debug). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's trace
+	$(call set-build-config,Debug,dbuild)
+	@if [ -z "$(TRACE)" ]; then \
+		echo "[test-fhetch-driver] TRACE unset — running simple_fhetch to produce one"; \
+		rm -rf simple_fhetch_example_simple; \
+		$(BUILD_DIR)/examples/simple_fhetch; \
+	fi
+	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N)
+
+test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's trace
 	$(call set-build-config,Release,build)
-	@if [ -z "$(TRACE)" ]; then echo "Pass TRACE=/path/to/file.fhetch"; exit 1; fi
-	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $(TRACE) --ring-dim $(N)
+	@if [ -z "$(TRACE)" ]; then \
+		echo "[test-fhetch-driver-release] TRACE unset — running simple_fhetch to produce one"; \
+		rm -rf simple_fhetch_example_simple; \
+		$(BUILD_DIR)/examples/simple_fhetch; \
+	fi
+	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N)
 
 ##@ Installation
 
