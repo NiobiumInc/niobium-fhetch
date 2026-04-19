@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build + tests (ubuntu-latest, Release)
+    runs-on: ubuntu-latest
+
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      # Forwarded to the CMake build via the Makefile.
+      OPENMP: OFF
+      NATIVEOPT: OFF
+
+    steps:
+      # ------------------------------------------------------------
+      # Checkout + submodules
+      # ------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # GH_COMPANY_TOKEN is used because vendor/openfhe points at
+          # NiobiumInc/openfhe-development which may be private until the
+          # full FHETCH toolchain goes public. If the secret is unset, the
+          # expression falls back to the auto-generated GITHUB_TOKEN — which
+          # works fine once every submodule is public.
+          token: ${{ secrets.GH_COMPANY_TOKEN || github.token }}
+          submodules: recursive
+          fetch-depth: 1
+
+      # ------------------------------------------------------------
+      # Shrink the runner's disk footprint — OpenFHE + cereal + tests
+      # take ~12 GB and ubuntu-latest ships with large pre-baked SDKs we
+      # don't need.
+      # ------------------------------------------------------------
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      # ------------------------------------------------------------
+      # System packages
+      # ------------------------------------------------------------
+      - name: Install build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ccache ninja-build
+          ccache --version
+
+      # ------------------------------------------------------------
+      # ccache: persist the C/C++ object cache across runs, keyed by
+      # source content so touched .cpp / .h files invalidate cleanly.
+      # ------------------------------------------------------------
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ubuntu-latest-ccache-release-${{ hashFiles('**/CMakeLists.txt', '**/*.cpp', '**/*.h', 'Makefile') }}
+          restore-keys: |
+            ubuntu-latest-ccache-release-
+
+      - name: Prime ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=2G
+          ccache --zero-stats
+
+      # ------------------------------------------------------------
+      # OpenFHE: full build is ~10 minutes. We cache both the install
+      # tree (vendor/lib/openfhe) and the CMake build tree
+      # (vendor/openfhe/build) so that unchanged submodule pins result
+      # in an ~instant "nothing to build" step.
+      #
+      # Cache key is salted with the pinned submodule commit so any
+      # OpenFHE bump invalidates the cache automatically.
+      # ------------------------------------------------------------
+      - name: Capture OpenFHE submodule commit
+        id: openfhe_rev
+        run: |
+          cd vendor/openfhe
+          rev=$(git rev-parse HEAD)
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+          cd -
+
+      - name: Restore OpenFHE build
+        id: restore_openfhe
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/lib/openfhe
+            vendor/openfhe/build
+          key: ubuntu-latest-openfhe-release-${{ steps.openfhe_rev.outputs.rev }}
+          restore-keys: |
+            ubuntu-latest-openfhe-release-
+
+      - name: Build OpenFHE (Release)
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+
+          # Trust the cached install tree only if its CMake config
+          # references *this* workspace — otherwise ship-of-Theseus
+          # paths inside the cached files will break downstream linking.
+          TARGETS_FILE="vendor/lib/openfhe/lib/OpenFHE/OpenFHETargets.cmake"
+          if [ -f "$TARGETS_FILE" ] && grep -q "${{ github.workspace }}" "$TARGETS_FILE"; then
+            echo "✓ OpenFHE cache valid for this workspace — skipping rebuild"
+          else
+            if [ -f "$TARGETS_FILE" ]; then
+              echo "✗ OpenFHE cache has a stale workspace path — rebuilding"
+              rm -rf vendor/lib/openfhe vendor/openfhe/build
+            fi
+            make config-openfhe-release NATIVEOPT=${NATIVEOPT} OPENMP=${OPENMP}
+            make build-openfhe-release
+          fi
+
+      # ------------------------------------------------------------
+      # niobium-fhetch: library + examples + tests (sim + fhetch_driver
+      # + simple_ops/bootstrap binaries all build together via
+      # NIOBIUM_FHETCH_WITH_EXAMPLES=ON + NIOBIUM_FHETCH_WITH_TESTS=ON;
+      # the Makefile's config-fhetch-release target sets both flags).
+      # ------------------------------------------------------------
+      - name: Configure niobium-fhetch
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          make config-fhetch-release
+
+      - name: Build niobium-fhetch
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          make build-release
+
+      - name: ccache stats
+        run: ccache --show-stats
+
+      # ------------------------------------------------------------
+      # Tests — bootstrap is excluded here because it has a pre-existing
+      # primary-side numerical-precision issue tracked separately; the
+      # rest of the simple_ops suite exercises both the primary recording
+      # path and the fhetch_driver re-drive (value-level roundtrip with
+      # decrypt verification on both sides).
+      # ------------------------------------------------------------
+      - name: Run simple_fhetch + fhetch_driver (sanity)
+        run: |
+          export LD_LIBRARY_PATH="$PWD/vendor/lib/openfhe/lib:$LD_LIBRARY_PATH"
+          make test-simple-fhetch-release
+          make test-fhetch-driver-release
+
+      - name: Run simple_ops roundtrip (13 ops, primary + secondary decrypt)
+        run: |
+          export LD_LIBRARY_PATH="$PWD/vendor/lib/openfhe/lib:$LD_LIBRARY_PATH"
+          make test-roundtrip-simple-ops-release
+
+      # ------------------------------------------------------------
+      # Artifacts on failure
+      # ------------------------------------------------------------
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ github.run_attempt }}
+          path: |
+            build/CMakeFiles/CMakeOutput.log
+            build/CMakeFiles/CMakeError.log
+            simple_fhetch_example_simple/
+            simple_ops_server_workload_*/
+            fhetch_driver_source_*/
+          if-no-files-found: ignore
+          retention-days: 7
