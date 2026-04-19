@@ -134,20 +134,22 @@ build-openfhe-release: ## Build and install OpenFHE (Release)
 
 ##@ Library Build
 
-config-fhetch: ## Configure the fhetch library + examples (Debug, requires OpenFHE built)
+config-fhetch: ## Configure the fhetch library + examples + tests (Debug, requires OpenFHE built)
 	$(call set-build-config,Debug,dbuild)
 	cmake -S $(CURDIR) -B $(CURDIR)/dbuild \
 		-DCMAKE_BUILD_TYPE=Debug \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
 		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
+		-DNIOBIUM_FHETCH_WITH_TESTS=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
 
-config-fhetch-release: ## Configure the fhetch library + examples (Release, requires OpenFHE built)
+config-fhetch-release: ## Configure the fhetch library + examples + tests (Release, requires OpenFHE built)
 	$(call set-build-config,Release,build)
 	cmake -S $(CURDIR) -B $(CURDIR)/build \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
 		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
+		-DNIOBIUM_FHETCH_WITH_TESTS=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
 
 ##@ Combined Targets
@@ -177,6 +179,21 @@ test-simple-fhetch-release: build-release ## Record + replay the FHETCH-only sim
 	$(call set-build-config,Release,build)
 	@rm -rf simple_fhetch_example_simple
 	$(BUILD_DIR)/examples/simple_fhetch
+
+# Re-drive a .fhetch trace through the API via tests/fhetch_driver.
+# Pass a trace path as TRACE=/path/to/file.fhetch, ring dim as N=2048.
+TRACE ?=
+N     ?= 2048
+
+test-fhetch-driver: build ## Re-drive a .fhetch trace (Debug). TRACE=<path> N=<ring_dim>
+	$(call set-build-config,Debug,dbuild)
+	@if [ -z "$(TRACE)" ]; then echo "Pass TRACE=/path/to/file.fhetch"; exit 1; fi
+	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $(TRACE) --ring-dim $(N)
+
+test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release). TRACE=<path> N=<ring_dim>
+	$(call set-build-config,Release,build)
+	@if [ -z "$(TRACE)" ]; then echo "Pass TRACE=/path/to/file.fhetch"; exit 1; fi
+	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $(TRACE) --ring-dim $(N)
 
 ##@ Installation
 
