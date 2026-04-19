@@ -254,6 +254,17 @@ Run:
 make test-simple-fhetch-release
 ```
 
+### Test harness — `fhetch_driver`
+
+`tests/fhetch_driver/` ships a standalone executable that reads a `.fhetch` trace from disk and re-drives it through the FHETCH API, producing a secondary trace that is replayed through the simulator. Useful for regression-checking that every opcode in a trace round-trips cleanly through the library's recording path.
+
+The parser itself is a public library component — `include/niobium/fhetch_parser.h` + `src/fhetch_parser.cpp` — so other callers can consume it directly via `libnbfhetch`. Build-gated by `NIOBIUM_FHETCH_WITH_TESTS=ON`.
+
+```bash
+make build-release
+make test-fhetch-driver-release TRACE=/path/to/trace.fhetch N=2048
+```
+
 ## Architecture notes
 
 - **Thin, scheme-agnostic recording.** The library records FHETCH Polynomial IR only. Scheme-level semantics (CKKS vs BFV vs BGV, which polynomial operations a given ciphertext op lowers to) are the responsibility of the host integration and its FHE backend.

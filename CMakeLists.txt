@@ -62,6 +62,7 @@ set(LIB_SOURCES
     src/auto_facade.cpp
     src/compiler.cpp
     src/fhetch_api.cpp
+    src/fhetch_parser.cpp
     src/fhetch_sim/instruction.cpp
     src/fhetch_sim/simulator.cpp
     src/probes.cpp
@@ -174,4 +175,14 @@ option(NIOBIUM_FHETCH_WITH_EXAMPLES "Build FHETCH examples" OFF)
 
 if(NIOBIUM_FHETCH_WITH_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+# ==============================================================================
+# Tests (optional)
+# ==============================================================================
+
+option(NIOBIUM_FHETCH_WITH_TESTS "Build FHETCH test harnesses" OFF)
+
+if(NIOBIUM_FHETCH_WITH_TESTS)
+    add_subdirectory(tests)
 endif()

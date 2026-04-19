@@ -51,3 +51,6 @@ epoch_fhetch_example_epoch/
 
 # OpenFHE install prefix (set by Makefile)
 vendor/lib/
+
+# fhetch_driver test-harness output cache dirs
+fhetch_driver_source_*/
