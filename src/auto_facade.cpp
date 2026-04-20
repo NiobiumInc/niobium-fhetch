@@ -422,28 +422,33 @@ static size_t capture_dcrt_polys(Compiler& compiler,
     return count;
 }
 
-// Helper: serialize eval keys to .bin in OpenFHE's native binary format
-// (same format DeserializeEvalMultKey / DeserializeEvalAutomorphismKey expect).
-// Writing this format — rather than a custom cereal dump — lets the compiler's
-// replay_data.cpp consume the .bin directly via its evalmult_format=openfhe_binary
-// path when the client dispatches to --target=<non-local>.
-// `is_automorphism` selects between SerializeEvalMultKey and
-// SerializeEvalAutomorphismKey since they're separate static methods.
+// Helper: serialize eval keys to .bin via cereal + write .ids
+//
+// Format (stable — consumed by both tests/fhetch_driver/main.cpp's
+// load_key_bin and niobium-compiler's cereal_binary key reader):
+//   uint32_t num_keys
+//   for each key:
+//     uint32_t av_size; DCRTPoly * av_size   (A vector)
+//     uint32_t bv_size; DCRTPoly * bv_size   (B vector)
+// The companion .ids file lists FHETCH addresses flattened across all
+// keys' (A, B) DCRTPoly towers, in the same order as serialization.
 static void serialize_eval_keys(
-    const std::vector<lbcrypto::EvalKey<DCRTPoly>>& /*keys*/,
+    const std::vector<lbcrypto::EvalKey<DCRTPoly>>& keys,
     const std::filesystem::path& bin_path,
     const std::filesystem::path& ids_path,
-    const std::vector<uint64_t>& addr_ids,
-    bool is_automorphism) {
+    const std::vector<uint64_t>& addr_ids) {
     cereal_io::write_addr_ids(ids_path, addr_ids);
     std::ofstream bin(bin_path, std::ios::binary);
     if (!bin.is_open()) return;
-    if (is_automorphism) {
-        lbcrypto::CryptoContextImpl<DCRTPoly>::SerializeEvalAutomorphismKey(
-            bin, lbcrypto::SerType::BINARY);
-    } else {
-        lbcrypto::CryptoContextImpl<DCRTPoly>::SerializeEvalMultKey(
-            bin, lbcrypto::SerType::BINARY);
+    cereal::PortableBinaryOutputArchive ar(bin);
+    ar(static_cast<uint32_t>(keys.size()));
+    for (const auto& key : keys) {
+        const auto& av = key->GetAVector();
+        const auto& bv = key->GetBVector();
+        ar(static_cast<uint32_t>(av.size()));
+        for (const auto& dcrt : av) ar(dcrt);
+        ar(static_cast<uint32_t>(bv.size()));
+        for (const auto& dcrt : bv) ar(dcrt);
     }
 }
 
@@ -469,8 +474,7 @@ void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
         }
         if (!all_mk.empty()) {
             serialize_eval_keys(all_mk,
-                dir / (prog + ".mk.bin"), dir / (prog + ".mk.ids"), mk_addr_ids,
-                /*is_automorphism=*/false);
+                dir / (prog + ".mk.bin"), dir / (prog + ".mk.ids"), mk_addr_ids);
             if (!mk_addr_ids.empty())
                 set_key_start_addr_id("evalmult", mk_addr_ids[0]);
         }
@@ -491,8 +495,7 @@ void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
         }
         if (!all_rk.empty()) {
             serialize_eval_keys(all_rk,
-                dir / (prog + ".rk.bin"), dir / (prog + ".rk.ids"), rk_addr_ids,
-                /*is_automorphism=*/true);
+                dir / (prog + ".rk.bin"), dir / (prog + ".rk.ids"), rk_addr_ids);
             if (!rk_addr_ids.empty())
                 set_key_start_addr_id("evalautomorphism", rk_addr_ids[0]);
         }

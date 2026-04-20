@@ -880,13 +880,13 @@ void Compiler::write_replay_json() {
 
     // ---- Top-level fields matching compiler's replay.json ----
     replay["input_format"] = "cereal_binary";
-    // Keys are written via OpenFHE's native SerializeEvalMultKey /
-    // SerializeEvalAutomorphismKey (see serialize_eval_keys in auto_facade.cpp),
-    // so the compiler-side reader consumes them through its "openfhe_binary"
-    // branch in replay.cpp. Any change to the serializer format must stay in
-    // lockstep with this declaration.
-    replay["evalmult_format"] = "openfhe_binary";
-    replay["evalautomorphism_format"] = "openfhe_binary";
+    // Keys are written via serialize_eval_keys in auto_facade.cpp using a
+    // stable bespoke cereal layout: uint32 num_keys, then per-key
+    // (uint32 av_size, av DCRTPolys, uint32 bv_size, bv DCRTPolys). Both
+    // tests/fhetch_driver/main.cpp's load_key_bin and niobium-compiler's
+    // cereal_binary key reader consume this format.
+    replay["evalmult_format"] = "cereal_binary";
+    replay["evalautomorphism_format"] = "cereal_binary";
     replay["niobium_hw"] = impl_->niobium_hw_mode;
     replay["num_registers"] = 16;
     replay["config_sectors"] = 1;
