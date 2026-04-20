@@ -152,22 +152,20 @@ jobs:
         run: ccache --show-stats
 
       # ------------------------------------------------------------
-      # Tests — bootstrap is excluded here because it has a pre-existing
-      # primary-side numerical-precision issue tracked separately; the
-      # rest of the simple_ops suite exercises both the primary recording
-      # path and the fhetch_driver re-drive (value-level roundtrip with
-      # decrypt verification on both sides).
+      # Tests — single aggregate target.
+      #
+      # test-release runs every Release test known to succeed
+      # end-to-end: simple_fhetch (FHETCH-only example),
+      # fhetch_driver (re-drive a trace through the API, defaults to
+      # the simple_fhetch trace), and the full simple_ops roundtrip
+      # (13 ops × primary + secondary decrypt). Bootstrap is
+      # deliberately excluded — its primary-side CKKS approximation
+      # error is tracked as a simulator-precision follow-up.
       # ------------------------------------------------------------
-      - name: Run simple_fhetch + fhetch_driver (sanity)
+      - name: Run test-release
         run: |
           export LD_LIBRARY_PATH="$PWD/vendor/lib/openfhe/lib:$LD_LIBRARY_PATH"
-          make test-simple-fhetch-release
-          make test-fhetch-driver-release
-
-      - name: Run simple_ops roundtrip (13 ops, primary + secondary decrypt)
-        run: |
-          export LD_LIBRARY_PATH="$PWD/vendor/lib/openfhe/lib:$LD_LIBRARY_PATH"
-          make test-roundtrip-simple-ops-release
+          make test-release
 
       # ------------------------------------------------------------
       # Artifacts on failure
