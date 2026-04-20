@@ -66,6 +66,12 @@ struct Compiler::Impl {
     uint64_t evalmult_start_addr_id = 0;
     uint64_t evalautomorphism_start_addr_id = 0;
 
+    // Replay target. "local" runs the in-process FHETCH simulator; any other
+    // value (e.g. "FUNC_SIM", "fpga5.2") hands the recorded project off to
+    // the compiler's nbcc_fhetch_replay executable instead. Selected via
+    // --target=<value> on the CLI consumed by init().
+    std::string target = "local";
+
     // Last written trace path (set by stop())
     std::filesystem::path last_trace_path;
 
@@ -136,18 +142,28 @@ Compiler::~Compiler() = default;
 
 void Compiler::init(int& argc, char** argv) {
     // Parse and consume Niobium-specific flags from argv.
-    // Recognized flags: --hollow, --multithreaded, --ascii-json
+    // Recognized flags: --hollow, --multithreaded, --target=<value>
     int write_pos = 1;
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--hollow") == 0) {
+        const char* a = argv[i];
+        if (std::strcmp(a, "--hollow") == 0) {
             impl_->hollow_mode = true;
-        } else if (std::strcmp(argv[i], "--multithreaded") == 0) {
+        } else if (std::strcmp(a, "--multithreaded") == 0) {
             impl_->multithreaded = true;
+        } else if (std::strncmp(a, "--target=", 9) == 0) {
+            impl_->target = a + 9;
+        } else if (std::strcmp(a, "--target") == 0 && i + 1 < argc) {
+            impl_->target = argv[++i];
         } else {
             argv[write_pos++] = argv[i];
         }
     }
     argc = write_pos;
+
+    if (impl_->target != "local") {
+        std::cout << "[NIOBIUM] Target: " << impl_->target
+                  << " (replay will hand off to nbcc_fhetch_replay)" << std::endl;
+    }
 }
 
 bool Compiler::start() {
@@ -423,6 +439,17 @@ bool Compiler::replay() {
         return false;
     }
 
+    // ----- Target != local: hand the fhetch project off to the compiler -----
+    // For any non-"local" target we skip the in-process FHETCH simulator and
+    // invoke the compiler-side driver (nbcc_fhetch_replay) which runs the full
+    // Niobium optimization pipeline, produces replay.json + artifacts, executes
+    // replay against the selected target device, and writes the resulting
+    // probes back into <program_dir>/serialized_probes/ so result() picks them
+    // up transparently.
+    if (impl_->target != "local") {
+        return dispatch_to_compiler_target();
+    }
+
     // Cache-hit replay: the recording pass populated captured_outputs in
     // memory AND wrote <program>.outputs.json to disk. On a fresh process
     // start (e.g. the second run of an auto-facade workflow) the in-memory
@@ -646,6 +673,62 @@ bool Compiler::replay() {
 }
 
 // ============================================================================
+// dispatch_to_compiler_target — invoke nbcc_fhetch_replay for non-local targets
+// ============================================================================
+//
+// When the user passes --target=<value> (value != "local") to the client, we
+// skip the in-process FHETCH simulator and spawn the compiler-side driver.
+// The driver reads the recorded fhetch project, re-records it through the
+// full Niobium optimization pipeline, executes replay against the selected
+// target device, and writes ciphertext probes into <program_dir>/serialized_probes/.
+// result() on the client side reads from that same directory, so no further
+// plumbing is needed.
+//
+// The executable is located via:
+//   1. NBCC_FHETCH_REPLAY env var (absolute path, wins if set)
+//   2. PATH lookup for "nbcc_fhetch_replay"
+bool Compiler::dispatch_to_compiler_target() {
+    auto dir = get_program_directory();
+    std::string exec;
+    if (const char* env = std::getenv("NBCC_FHETCH_REPLAY")) {
+        exec = env;
+    } else {
+        exec = "nbcc_fhetch_replay";
+    }
+
+    // Build: <exec> --project=<dir> --target=<target>
+    // Pass shell-escaped args; the dir paths we produce contain no spaces.
+    std::string cmd = exec
+        + " --project=\"" + dir.string() + "\""
+        + " --target=\"" + impl_->target + "\"";
+
+    std::cout << "[NIOBIUM] Dispatching replay to compiler target '"
+              << impl_->target << "' via: " << cmd << std::endl;
+
+    int rc = std::system(cmd.c_str());
+    if (rc != 0) {
+        std::cerr << "[NIOBIUM] nbcc_fhetch_replay failed (exit " << rc
+                  << "). Is the binary on PATH, or NBCC_FHETCH_REPLAY set?"
+                  << std::endl;
+        return false;
+    }
+
+    // At this point <program_dir>/serialized_probes/<name>.ct should exist
+    // for every probe. result<Ciphertext>() reads those directly.
+    auto probes_dir = dir / "serialized_probes";
+    if (!std::filesystem::exists(probes_dir) ||
+        std::filesystem::is_empty(probes_dir)) {
+        std::cerr << "[NIOBIUM] nbcc_fhetch_replay reported success but produced "
+                     "no serialized probes in " << probes_dir << std::endl;
+        return false;
+    }
+
+    std::cout << "[NIOBIUM] Compiler-target replay complete. Probes in "
+              << probes_dir << std::endl;
+    return true;
+}
+
+// ============================================================================
 // write_replay_json — serialize inputs, outputs, and metadata for replay
 // ============================================================================
 
@@ -710,12 +793,23 @@ void Compiler::write_replay_json() {
     {
         json inputs_index;
         inputs_index["program_name"] = prog + ".fhetch";
-        inputs_index["input_count"] = impl_->captured_inputs.size();
+        // input_count is re-set below after filtering out key-named captures.
         inputs_index["input_format"] = "cereal_binary";
         inputs_index["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         json inputs_arr = json::array();
+        size_t skipped_keys = 0;
         for (const auto& input : impl_->captured_inputs) {
+            // Eval keys are captured in m_captured_inputs (for data capture) but
+            // serialized separately to .mk.bin / .rk.bin via OpenFHE's native
+            // format (see tag_keys). Don't emit them as user inputs here — the
+            // compiler reads them through its evalmult_keys / evalautomorphism_keys
+            // paths instead.
+            if (input.name == "evalmult_key" ||
+                input.name == "automorphism_key") {
+                ++skipped_keys;
+                continue;
+            }
             json idx;
             idx["name"] = input.name;
             idx["ids_file"] = prog + ".input_" + input.name + ".ids";
@@ -724,6 +818,7 @@ void Compiler::write_replay_json() {
             inputs_arr.push_back(idx);
         }
         inputs_index["inputs"] = inputs_arr;
+        inputs_index["input_count"] = inputs_arr.size();
         std::ofstream inp_out(dir / inputs_index_file);
         if (inp_out.is_open()) {
             inp_out << inputs_index.dump(2) << std::endl;
@@ -785,8 +880,13 @@ void Compiler::write_replay_json() {
 
     // ---- Top-level fields matching compiler's replay.json ----
     replay["input_format"] = "cereal_binary";
-    replay["evalmult_format"] = "cereal_binary";
-    replay["evalautomorphism_format"] = "cereal_binary";
+    // Keys are written via OpenFHE's native SerializeEvalMultKey /
+    // SerializeEvalAutomorphismKey (see serialize_eval_keys in auto_facade.cpp),
+    // so the compiler-side reader consumes them through its "openfhe_binary"
+    // branch in replay.cpp. Any change to the serializer format must stay in
+    // lockstep with this declaration.
+    replay["evalmult_format"] = "openfhe_binary";
+    replay["evalautomorphism_format"] = "openfhe_binary";
     replay["niobium_hw"] = impl_->niobium_hw_mode;
     replay["num_registers"] = 16;
     replay["config_sectors"] = 1;

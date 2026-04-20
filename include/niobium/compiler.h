@@ -309,6 +309,11 @@ private:
     void write_replay_json();
     void write_replay_outputs();
 
+    /// Hand the recorded fhetch project off to the compiler-side
+    /// nbcc_fhetch_replay executable (used when --target=<non-local>).
+    /// Returns true if the external driver succeeded and probes were written.
+    bool dispatch_to_compiler_target();
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 

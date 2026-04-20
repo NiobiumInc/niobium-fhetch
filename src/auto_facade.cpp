@@ -192,6 +192,24 @@ void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
         this->tag_bootstrap_precompute(cc);
     });
 
+    // Serialize the CryptoContext to <program_dir>/cryptocontext.dat so the
+    // compiler-side --target replay driver (nbcc_fhetch_replay) can load it
+    // to reconstruct probe ciphertexts. Cheap (one-time), so do it always.
+    try {
+        auto dir = get_program_directory();
+        std::filesystem::create_directories(dir);
+        auto cc_path = dir / "cryptocontext.dat";
+        if (!std::filesystem::exists(cc_path)) {
+            if (!lbcrypto::Serial::SerializeToFile(cc_path.string(), cc,
+                                                   lbcrypto::SerType::BINARY)) {
+                std::cerr << "[NIOBIUM] WARNING: Failed to serialize crypto context to "
+                          << cc_path << std::endl;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NIOBIUM] WARNING: CC serialize raised: " << e.what() << std::endl;
+    }
+
     std::cout << "[NIOBIUM] Captured crypto context: scheme=" << scheme
               << " ring_dim=" << rd
               << " depth=" << depth
@@ -251,7 +269,11 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
         if (bin_stream.is_open()) {
             cereal::PortableBinaryOutputArchive ar(bin_stream);
             ar(static_cast<uint32_t>(1));  // instances_count
-            ar(static_cast<uint8_t>(1));   // payload_type: ciphertext
+            // payload_type code must match niobium-compiler's
+            // niobium::cereal_io::PayloadTypeCode enum:
+            // CIPHERTEXT=0, PLAINTEXT=1, DCRTPOLY_PROXY=2,
+            // CIPHERTEXT_VECTOR=3, PLAINTEXT_VECTOR=4.
+            ar(static_cast<uint8_t>(0));   // payload_type: CIPHERTEXT
             auto& elements = ct->GetElements();
             ar(static_cast<uint32_t>(elements.size()));
             for (auto& dcrt : elements) {
@@ -400,26 +422,28 @@ static size_t capture_dcrt_polys(Compiler& compiler,
     return count;
 }
 
-// Helper: serialize eval keys to .bin via cereal + write .ids
+// Helper: serialize eval keys to .bin in OpenFHE's native binary format
+// (same format DeserializeEvalMultKey / DeserializeEvalAutomorphismKey expect).
+// Writing this format — rather than a custom cereal dump — lets the compiler's
+// replay_data.cpp consume the .bin directly via its evalmult_format=openfhe_binary
+// path when the client dispatches to --target=<non-local>.
+// `is_automorphism` selects between SerializeEvalMultKey and
+// SerializeEvalAutomorphismKey since they're separate static methods.
 static void serialize_eval_keys(
-    const std::vector<lbcrypto::EvalKey<DCRTPoly>>& keys,
+    const std::vector<lbcrypto::EvalKey<DCRTPoly>>& /*keys*/,
     const std::filesystem::path& bin_path,
     const std::filesystem::path& ids_path,
-    const std::vector<uint64_t>& addr_ids) {
-    // .ids
+    const std::vector<uint64_t>& addr_ids,
+    bool is_automorphism) {
     cereal_io::write_addr_ids(ids_path, addr_ids);
-    // .bin — serialize each key's A/B vectors
     std::ofstream bin(bin_path, std::ios::binary);
     if (!bin.is_open()) return;
-    cereal::PortableBinaryOutputArchive ar(bin);
-    ar(static_cast<uint32_t>(keys.size()));
-    for (const auto& key : keys) {
-        const auto& av = key->GetAVector();
-        const auto& bv = key->GetBVector();
-        ar(static_cast<uint32_t>(av.size()));
-        for (const auto& dcrt : av) ar(dcrt);
-        ar(static_cast<uint32_t>(bv.size()));
-        for (const auto& dcrt : bv) ar(dcrt);
+    if (is_automorphism) {
+        lbcrypto::CryptoContextImpl<DCRTPoly>::SerializeEvalAutomorphismKey(
+            bin, lbcrypto::SerType::BINARY);
+    } else {
+        lbcrypto::CryptoContextImpl<DCRTPoly>::SerializeEvalMultKey(
+            bin, lbcrypto::SerType::BINARY);
     }
 }
 
@@ -445,7 +469,8 @@ void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
         }
         if (!all_mk.empty()) {
             serialize_eval_keys(all_mk,
-                dir / (prog + ".mk.bin"), dir / (prog + ".mk.ids"), mk_addr_ids);
+                dir / (prog + ".mk.bin"), dir / (prog + ".mk.ids"), mk_addr_ids,
+                /*is_automorphism=*/false);
             if (!mk_addr_ids.empty())
                 set_key_start_addr_id("evalmult", mk_addr_ids[0]);
         }
@@ -466,7 +491,8 @@ void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
         }
         if (!all_rk.empty()) {
             serialize_eval_keys(all_rk,
-                dir / (prog + ".rk.bin"), dir / (prog + ".rk.ids"), rk_addr_ids);
+                dir / (prog + ".rk.bin"), dir / (prog + ".rk.ids"), rk_addr_ids,
+                /*is_automorphism=*/true);
             if (!rk_addr_ids.empty())
                 set_key_start_addr_id("evalautomorphism", rk_addr_ids[0]);
         }
