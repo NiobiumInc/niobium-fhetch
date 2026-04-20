@@ -42,61 +42,82 @@ static std::vector<lbcrypto::Ciphertext<DCRTPoly>> g_stored_ciphertexts;
 static lbcrypto::CryptoContext<DCRTPoly> g_stored_cc;
 
 // ============================================================================
-// Global flags read by instrumented OpenFHE headers
-// (declared extern in niobium_auto_hooks.h)
+// Global flags read by instrumented OpenFHE headers (declared extern in
+// niobium_auto_hooks.h). Defined as weak so a host-side auto-facade library
+// (e.g. niobium-client's libnbclient_autofacade) can provide strong
+// definitions that override these defaults. The macro is set below together
+// with the per-function NB_WEAK in the niobium_auto namespace.
 // ============================================================================
 
-bool g_replay_mode = false;
-std::atomic<uint64_t> g_replay_noop_count{0};
+#if defined(__GNUC__) || defined(__clang__)
+  #define NB_WEAK __attribute__((weak))
+#else
+  #define NB_WEAK
+#endif
+
+NB_WEAK bool g_replay_mode = false;
+NB_WEAK std::atomic<uint64_t> g_replay_noop_count{0};
 
 // ============================================================================
-// niobium_auto::* hooks — signatures must match niobium_auto_hooks.h exactly
+// niobium_auto::* hooks — signatures must match niobium_auto_hooks.h exactly.
+//
+// The library ships no-op default implementations so a plain link of
+// libnbfhetch into an OpenFHE program is well-formed even if the program
+// does not opt into any auto-facade behaviour. Every stub below is declared
+// __attribute__((weak)) so a host that DOES want the auto-facade — e.g.
+// niobium-client's libnbclient_autofacade, which links the ported
+// AutoFacade.cpp from niobium-compiler — can provide strong definitions
+// that transparently override these stubs at link time.
+//
+// The macro is defined as an empty expansion on compilers that don't
+// support weak symbols; ODR violations from a strong + a default stub are
+// a link error rather than silent misbehaviour.
 // ============================================================================
 
 namespace niobium_auto {
 
-void on_deserialize_crypto_context(
+NB_WEAK void on_deserialize_crypto_context(
     lbcrypto::CryptoContext<DCRTPoly>& /*cc*/) {
-    // No-op in client — crypto context capture is explicit via compiler API.
+    // Default — crypto context capture is explicit via compiler API.
 }
 
-void on_deserialize_ciphertext(
+NB_WEAK void on_deserialize_ciphertext(
     const std::string& /*filepath*/,
     lbcrypto::Ciphertext<DCRTPoly>& /*ct*/) {
-    // No-op in client.
+    // Default — no-op.
 }
 
-void lazy_init(const lbcrypto::CryptoContext<DCRTPoly>& /*cc*/) {
-    // No-op in client — init is explicit via compiler().init().
+NB_WEAK void lazy_init(const lbcrypto::CryptoContext<DCRTPoly>& /*cc*/) {
+    // Default — init is explicit via compiler().init().
 }
 
-void lazy_init() {
-    // No-arg overload — no-op in client.
+NB_WEAK void lazy_init() {
+    // Default — no-op.
 }
 
-bool on_serialize_ciphertext(
+NB_WEAK bool on_serialize_ciphertext(
     const std::string& /*filepath*/,
     const lbcrypto::Ciphertext<DCRTPoly>& /*ct*/) {
-    // Return false: caller proceeds with normal file write.
+    // Default — false: caller proceeds with normal file write.
     return false;
 }
 
-bool is_recording() {
+NB_WEAK bool is_recording() {
     return niobium::compiler().running_p();
 }
 
-bool on_decrypt(lbcrypto::Ciphertext<DCRTPoly>& /*ct*/) {
-    // Return false: caller proceeds with normal Decrypt.
+NB_WEAK bool on_decrypt(lbcrypto::Ciphertext<DCRTPoly>& /*ct*/) {
+    // Default — false: caller proceeds with normal Decrypt.
     return false;
 }
 
-bool is_replaying() {
+NB_WEAK bool is_replaying() {
     return g_replay_mode;
 }
 
-std::shared_ptr<lbcrypto::SchemeBase<DCRTPoly>> unwrap_scheme(
+NB_WEAK std::shared_ptr<lbcrypto::SchemeBase<DCRTPoly>> unwrap_scheme(
     const std::shared_ptr<lbcrypto::SchemeBase<DCRTPoly>>& scheme) {
-    // Client doesn't use the NiobiumAutoScheme proxy — return as-is.
+    // Default — NiobiumAutoScheme proxy is not used; pass scheme through.
     return scheme;
 }
 
@@ -252,10 +273,16 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
     tag_input(input_name, mutable_ct, file);
 }
 
+namespace { thread_local bool g_in_probe = false; }
+
 template<>
 void Compiler::probe<lbcrypto::Ciphertext<DCRTPoly>>(
     const std::string& var_name,
     const lbcrypto::Ciphertext<DCRTPoly>& ct) {
+    if (g_in_probe) return;
+    g_in_probe = true;
+    struct Guard { ~Guard() { g_in_probe = false; } } guard;
+
     // Record the FHETCH addresses of the output polynomials.
     const auto& elements = ct->GetElements();
     for (const auto& dcrt : elements) {
@@ -655,6 +682,14 @@ void niobium::Compiler::refresh_all_inputs() {
 // rather than accessing Impl directly.
 
 void Compiler::reconstruct_probes() {
+    // Re-entry guard. The Serial::{De,}SerializeFromFile calls below fire
+    // the auto-facade's on_{de,}serialize_ciphertext hooks, which in turn
+    // call probe() / ensure_replayed() → back into this code. Use the
+    // same thread-local flag probe() uses so the nested calls short-circuit.
+    if (g_in_probe) return;
+    g_in_probe = true;
+    struct Guard { ~Guard() { g_in_probe = false; } } guard;
+
     auto dir = get_program_directory();
     auto templates_dir = dir / "ciphertext_templates";
     auto serialized_dir = dir / "serialized_probes";
