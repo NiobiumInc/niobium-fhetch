@@ -192,6 +192,24 @@ void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
         this->tag_bootstrap_precompute(cc);
     });
 
+    // Serialize the CryptoContext to <program_dir>/cryptocontext.dat so the
+    // compiler-side --target replay driver (nbcc_fhetch_replay) can load it
+    // to reconstruct probe ciphertexts. Cheap (one-time), so do it always.
+    try {
+        auto dir = get_program_directory();
+        std::filesystem::create_directories(dir);
+        auto cc_path = dir / "cryptocontext.dat";
+        if (!std::filesystem::exists(cc_path)) {
+            if (!lbcrypto::Serial::SerializeToFile(cc_path.string(), cc,
+                                                   lbcrypto::SerType::BINARY)) {
+                std::cerr << "[NIOBIUM] WARNING: Failed to serialize crypto context to "
+                          << cc_path << std::endl;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NIOBIUM] WARNING: CC serialize raised: " << e.what() << std::endl;
+    }
+
     std::cout << "[NIOBIUM] Captured crypto context: scheme=" << scheme
               << " ring_dim=" << rd
               << " depth=" << depth
@@ -251,7 +269,11 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
         if (bin_stream.is_open()) {
             cereal::PortableBinaryOutputArchive ar(bin_stream);
             ar(static_cast<uint32_t>(1));  // instances_count
-            ar(static_cast<uint8_t>(1));   // payload_type: ciphertext
+            // payload_type code must match niobium-compiler's
+            // niobium::cereal_io::PayloadTypeCode enum:
+            // CIPHERTEXT=0, PLAINTEXT=1, DCRTPOLY_PROXY=2,
+            // CIPHERTEXT_VECTOR=3, PLAINTEXT_VECTOR=4.
+            ar(static_cast<uint8_t>(0));   // payload_type: CIPHERTEXT
             auto& elements = ct->GetElements();
             ar(static_cast<uint32_t>(elements.size()));
             for (auto& dcrt : elements) {
@@ -401,14 +423,21 @@ static size_t capture_dcrt_polys(Compiler& compiler,
 }
 
 // Helper: serialize eval keys to .bin via cereal + write .ids
+//
+// Format (stable — consumed by both tests/fhetch_driver/main.cpp's
+// load_key_bin and niobium-compiler's cereal_binary key reader):
+//   uint32_t num_keys
+//   for each key:
+//     uint32_t av_size; DCRTPoly * av_size   (A vector)
+//     uint32_t bv_size; DCRTPoly * bv_size   (B vector)
+// The companion .ids file lists FHETCH addresses flattened across all
+// keys' (A, B) DCRTPoly towers, in the same order as serialization.
 static void serialize_eval_keys(
     const std::vector<lbcrypto::EvalKey<DCRTPoly>>& keys,
     const std::filesystem::path& bin_path,
     const std::filesystem::path& ids_path,
     const std::vector<uint64_t>& addr_ids) {
-    // .ids
     cereal_io::write_addr_ids(ids_path, addr_ids);
-    // .bin — serialize each key's A/B vectors
     std::ofstream bin(bin_path, std::ios::binary);
     if (!bin.is_open()) return;
     cereal::PortableBinaryOutputArchive ar(bin);
