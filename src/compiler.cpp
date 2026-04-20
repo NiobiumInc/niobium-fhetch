@@ -423,6 +423,36 @@ bool Compiler::replay() {
         return false;
     }
 
+    // Cache-hit replay: the recording pass populated captured_outputs in
+    // memory AND wrote <program>.outputs.json to disk. On a fresh process
+    // start (e.g. the second run of an auto-facade workflow) the in-memory
+    // map is empty, so write_replay_outputs / reconstruct_probes would
+    // skip silently. Rehydrate from the on-disk outputs.json so the
+    // downstream reconstruction stage has something to work with.
+    if (impl_->captured_outputs.empty()) {
+        auto dir = get_program_directory();
+        auto outputs_path = dir / (impl_->full_program_name() + ".outputs.json");
+        if (std::filesystem::exists(outputs_path)) {
+            std::ifstream ifs(outputs_path);
+            nlohmann::json j = nlohmann::json::parse(ifs, nullptr, false);
+            if (!j.is_discarded() && j.contains("outputs")) {
+                for (const auto& out : j["outputs"]) {
+                    std::string name = out.value("name", "");
+                    if (name.empty() || !out.contains("ciphertext_data")) continue;
+                    for (const auto& poly : out["ciphertext_data"]) {
+                        if (!poly.contains("elements")) continue;
+                        for (const auto& elem : poly["elements"]) {
+                            // Modulus is unknown here; set to 0. The simulator
+                            // uses addr_id only for output-extraction, not
+                            // modulus semantics, so the placeholder is safe.
+                            store_output_probe(name, elem.get<uint64_t>(), 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     std::cout << "[NIOBIUM] Replaying trace: " << impl_->last_trace_path << std::endl;
 
     impl_->simulator = std::make_unique<fhetch_sim::Simulator>();
