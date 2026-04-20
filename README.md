@@ -43,6 +43,17 @@ This library is linked by host integrations (e.g. [`niobium-client`](https://git
 
 The FHETCH library itself is scheme-agnostic. The FHE-scheme bindings (e.g. "this OpenFHE `EvalMult` call becomes these `sr_mulp` instructions") live in a host integration — typically `niobium-client`, which links this library and an instrumented OpenFHE build.
 
+## Relationship to OpenFHE
+
+**The FHETCH API is library-agnostic.** `fhetch_api.h` is a pure Polynomial IR: polynomials, scalars, multi-residue objects, and the instructions that operate on them. Nothing in the API surface names OpenFHE, references OpenFHE types, or assumes a particular FHE scheme. A hypothetical host using HElib, SEAL, TFHE-rs, Lattigo, or a hand-rolled ring backend would interact with the same `sr_addp` / `sr_ntt` / `tag_input` / `tag_output` API and produce the same `.fhetch` trace format.
+
+Within this repository OpenFHE is vendored as a **helper**, used in two concrete and self-contained places:
+
+- **Simulator-side polynomial math.** The bundled `fhetch_sim` executor needs a working modular-arithmetic backend to actually evaluate each `sr_*` instruction against real values (so `Compiler::replay()` can reconstruct output ciphertexts and decrypt round-trips like the ones in `tests/`). Rather than re-implement NTT, modular multiplication, `NativeInteger` / `NativeVector` wrappers, etc., the simulator calls into OpenFHE's `core/math/hal/intnat` path. This is an implementation choice for the reference simulator; it does not leak into the FHETCH IR.
+- **Input / key / output serialization.** The `.input_*.bin`, `.mk.bin`, `.rk.bin`, and ciphertext-template files that host integrations produce (and that `fhetch_driver` consumes in roundtrip mode) use the **cereal** binary format vendored inside OpenFHE's third-party tree. Again, this is a pragmatic reuse — any host that speaks cereal-compatible binary can produce or consume those files. If a future host prefers a different serialization (Protocol Buffers, Arrow, raw little-endian dumps), only the helpers in `auto_facade.cpp` / `src/fhetch_parser.cpp` need to change; the on-the-wire `.fhetch` trace format and the public API stay the same.
+
+In short: the `.fhetch` trace and the `niobium::fhetch::` API surface are the intended portable interface. OpenFHE supplies the numerical engine and the binary container we chose for the reference implementation, nothing more. Hosts that want to replace one or the other can do so without touching the IR.
+
 ## Public API
 
 ### `fhetch_api.h` — FHETCH Polynomial IR
@@ -284,7 +295,7 @@ All 13 simple_ops (`ADD, SUB, NEG, ADDI, SUBI, MULI, ADD_ADD, ADD_SUB, MUL, MUL_
 - **Thin, scheme-agnostic recording.** The library records FHETCH Polynomial IR only. Scheme-level semantics (CKKS vs BFV vs BGV, which polynomial operations a given ciphertext op lowers to) are the responsibility of the host integration and its FHE backend.
 - **FHETCH-level trace.** The trace uses FHETCH operation names (`sr_addp`, `sr_ntt`, `mr_mulp`, ...) rather than internal hardware instructions. Lowering (e.g. `sr_ntt` → `ntt1`+`ntt2`, register allocation, load/store insertion) happens server-side.
 - **Compiler-parity conventions.** Output artifacts follow `niobium-compiler` conventions so the two toolchains can be diffed artifact-for-artifact: sentinel at `m[0]`, ascending modulus order, inputs at ids 1..24 / `evalmult` at 25 / `evalautomorphism` following.
-- **Local simulator for validation.** `fhetch_sim` replays a `.fhetch` file against its `fhetch_replay.json` using OpenFHE's `NativeVector` / `NativeInteger` math, giving a deterministic reference for what the hardware would compute. `Compiler::replay()` + `result()` exposes this round-trip to the host.
+- **Local simulator for validation.** `fhetch_sim` replays a `.fhetch` file against its `fhetch_replay.json` using OpenFHE's `NativeVector` / `NativeInteger` math as a concrete backend for the modular arithmetic, giving a deterministic reference for what the hardware would compute. `Compiler::replay()` + `result()` exposes this round-trip to the host. OpenFHE here is purely a helper library — see **Relationship to OpenFHE** above; the FHETCH IR it's executing makes no assumptions about the backend.
 
 ## License
 
