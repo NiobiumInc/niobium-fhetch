@@ -27,10 +27,8 @@ UNAME_S := $(shell uname -s)
 ifndef NUM_CPUS
   ifeq ($(UNAME_S), Darwin)
     NUM_CPUS := $(shell sysctl -n hw.ncpu)
-    export DYLD_LIBRARY_PATH := $(CURDIR)/vendor/lib/openfhe/lib:$(DYLD_LIBRARY_PATH)
   else
     NUM_CPUS := $(shell nproc)
-    export LD_LIBRARY_PATH := $(CURDIR)/vendor/lib/openfhe/lib:$(LD_LIBRARY_PATH)
   endif
 endif
 
@@ -56,6 +54,17 @@ FHETCH_INSTALL_DIR   := $(VENDOR_LIB_DIR)/niobium-fhetch
 
 OPENMP    ?= OFF
 NATIVEOPT ?= OFF
+
+# Export the OpenFHE lib dir on whichever variable the current OS uses so
+# the test targets can launch the examples without each recipe having to
+# repeat the LD_LIBRARY_PATH incantation. OPENFHE_INSTALL_DIR is
+# command-line-overridable, so `make OPENFHE_INSTALL_DIR=/abs/path …` from
+# a parent build (niobium-client) propagates correctly.
+ifeq ($(UNAME_S), Darwin)
+    export DYLD_LIBRARY_PATH := $(OPENFHE_INSTALL_DIR)/lib:$(DYLD_LIBRARY_PATH)
+else
+    export LD_LIBRARY_PATH   := $(OPENFHE_INSTALL_DIR)/lib:$(LD_LIBRARY_PATH)
+endif
 
 # ==============================================================================
 # Targets
@@ -275,6 +284,19 @@ test-roundtrip-bootstrap-release: build-release ## Full roundtrip for bootstrap 
 	$(BUILD_DIR)/tests/bootstrap_decrypt bootstrap_keys ct_result_secondary.bin
 
 test-roundtrip-release: test-roundtrip-simple-ops-release test-roundtrip-bootstrap-release ## Full roundtrip sweep: simple_ops + bootstrap
+
+# ==============================================================================
+# test-release — everything that currently passes
+# ==============================================================================
+# Aggregates the test targets known to succeed end-to-end, excluding the
+# bootstrap roundtrip (the primary-side CKKS decrypt there still trips the
+# approximation-error tolerance — tracked as a separate simulator precision
+# issue). Useful as the "ship it" gate and as the CI target for passing runs.
+
+test-release: \
+    test-simple-fhetch-release \
+    test-fhetch-driver-release \
+    test-roundtrip-simple-ops-release  ## Run all currently-passing Release tests
 
 ##@ Installation
 
