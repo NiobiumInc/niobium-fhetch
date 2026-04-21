@@ -798,16 +798,15 @@ void Compiler::write_replay_json() {
         inputs_index["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         json inputs_arr = json::array();
-        size_t skipped_keys = 0;
         for (const auto& input : impl_->captured_inputs) {
             // Eval keys are captured in m_captured_inputs (for data capture) but
-            // serialized separately to .mk.bin / .rk.bin via OpenFHE's native
-            // format (see tag_keys). Don't emit them as user inputs here — the
-            // compiler reads them through its evalmult_keys / evalautomorphism_keys
-            // paths instead.
+            // serialized separately to .mk.bin / .rk.bin via the bespoke cereal
+            // format in serialize_eval_keys (see auto_facade.cpp). Skip them
+            // here so the compiler reads them through its evalmult_keys /
+            // evalautomorphism_keys paths instead of treating them as user
+            // inputs.
             if (input.name == "evalmult_key" ||
                 input.name == "automorphism_key") {
-                ++skipped_keys;
                 continue;
             }
             json idx;
