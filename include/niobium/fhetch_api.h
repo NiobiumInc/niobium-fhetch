@@ -651,18 +651,58 @@ MRP mr_subset(const MRP& x, const ModuliBase& subbase);
 //  GADGETS — Fast Base Conversion and CKKS Rescale
 // ============================================================================
 
+/// Approximate-FBC algorithm variant.
+///
+/// - Standard:      y[p] = sum_i ((x[q_i] * q_hat[i]) mod q_i) * q_star[i,p] mod p
+///   Matches the default OpenFHE ApproxSwitchCRTBasis path (compile-time
+///   WITH_REDUCED_NOISE=OFF). Cited in Cheon-Han-Kim-Kim-Song SAC 2018
+///   §4.1 (BasisExtension).
+///
+/// - ReducedNoise:  same, but the scaled residue is rebased from q_i to p
+///   via signed-preserving SwitchModulus before the q_star multiply. Matches
+///   OpenFHE's ApproxSwitchCRTBasis when compiled with WITH_REDUCED_NOISE=ON.
+///   Produces ciphertexts with ~1 bit less FBC noise at the cost of extra
+///   muli/addi instructions per (source prime, target prime) pair.
+///
+/// Callers wanting bit-parity with a specific OpenFHE build can gate the
+/// variant at the call site; the 2-arg overloads default to ReducedNoise,
+/// so programs linked against the niobium-instrumented OpenFHE (which
+/// ships with WITH_REDUCED_NOISE=ON) match the CPU reference without
+/// passing the variant explicitly.
+enum class FbcVariant {
+    Standard,
+    ReducedNoise,
+};
+
 /// Fast base conversion.
 /// Converts a coefficient-mode MRP from its current base to target_base
 /// using the CRT-based approximate conversion algorithm.
 /// @param x            Coefficient-mode MRP in source base.
 /// @param target_base  Target moduli base.
+/// @param variant      FBC algorithm variant (see FbcVariant).
+MRP fast_base_convert(const MRP& x, const ModuliBase& target_base,
+                      FbcVariant variant);
+
+/// Fast base conversion (default variant). Equivalent to
+/// `fast_base_convert(x, target_base, FbcVariant::ReducedNoise)` — the
+/// variant that matches the niobium-instrumented OpenFHE's CPU-reference
+/// output. Retained as a distinct symbol so binaries built against
+/// pre-variant headers keep linking without rebuild.
 MRP fast_base_convert(const MRP& x, const ModuliBase& target_base);
 
 /// CKKS rescale using fast base conversion.
 /// Removes the residues in rescale_base from x and rescales.
 /// @param x              Coefficient-mode MRP.
 /// @param rescale_base   Moduli to remove (subset of x.base()).
+/// @param variant        FBC algorithm variant used by the internal lift
+///                       (see FbcVariant).
 /// @return MRP in base = x.base() \ rescale_base.
+MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base,
+                FbcVariant variant);
+
+/// CKKS rescale (default variant). Equivalent to
+/// `rescale_fbc(x, rescale_base, FbcVariant::ReducedNoise)`. Retained as a
+/// distinct symbol for ABI compatibility (see fast_base_convert overload).
 MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base);
 
 // ============================================================================
