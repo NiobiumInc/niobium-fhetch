@@ -53,6 +53,13 @@ void reserve_fhetch_addresses(uint64_t next_addr);
 /// OpenFHE auto-facade path.
 void sync_fhetch_state_to_compiler();
 
+/// Capture an OpenFHE-internal DCRTPoly (passed as void* to keep probes.cpp
+/// free of OpenFHE headers) as an input. Implementation lives in
+/// auto_facade.cpp next to the other serialization helpers; the extern "C"
+/// probe entry point openfhe_cprobe_save_dcrt_poly in probes.cpp delegates
+/// here.
+void save_dcrt_poly_as_input(const void* dcrt_poly_ptr);
+
 }  // namespace niobium::detail
 
 // Forward-declare the opaque Polynomial struct so we can return its

@@ -244,6 +244,8 @@ void openfhe_cprobe_zero(uintptr_t poly_id, int /*format*/, uint64_t modulus) {
     std::string mi = (modulus != 0) ? midx(modulus) : "m=0";
     niobium::detail::trace_writer().emit(
         "sr_mulps " + addr(a) + ", " + addr(a) + ", 0, " + mi);
+    // Zero overwrites whatever was there — drop any stale clone-parent edge.
+    invalidate_clone_parent_on_write(a);
 }
 
 void openfhe_cprobe_max(uintptr_t poly_id, int /*format*/, uint64_t /*modulus*/) {
@@ -439,6 +441,7 @@ void openfhe_cprobe_ntt(uintptr_t dst, uintptr_t src, uint64_t modulus,
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_ntt " + addr(da) + ", " + addr(sa) + ", " + midx(modulus) +
          ", omega=" + std::to_string(omega));
+    invalidate_clone_parent_on_write(da);
 }
 
 void openfhe_cprobe_intt(uintptr_t dst, uintptr_t src, uint64_t modulus,
@@ -449,6 +452,7 @@ void openfhe_cprobe_intt(uintptr_t dst, uintptr_t src, uint64_t modulus,
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_intt " + addr(da) + ", " + addr(sa) + ", " + midx(modulus) +
          ", omega=" + std::to_string(omega));
+    invalidate_clone_parent_on_write(da);
 }
 
 // OpenFHE's poly-impl.h calls this as:
@@ -505,6 +509,30 @@ void openfhe_cprobe_switchmodulus(uintptr_t dst, uintptr_t src,
     emit("sr_mulps " + da + ", " + da + ", 1, " + midx(new_modulus));
     // addi dst, dst, neg_half, new_modulus
     emit("sr_addps " + da + ", " + da + ", " + std::to_string(neg_half) + ", " + midx(new_modulus));
+
+    // SwitchModulus writes to dst four times — its value is now derived from
+    // those ops, not from whatever it was copied from earlier. Drop any
+    // stale clone-parent edge so subsequent in-place probes don't have
+    // resolve_inplace_src silently rewrite src back to the pre-switch copy's
+    // parent. All the other arithmetic probes already do this; the
+    // switchmodulus lowering was the outlier.
+    invalidate_clone_parent_on_write(d);
+}
+
+// ============================================================================
+// OpenFHE-internal DCRTPoly capture
+//
+// OpenFHE constructs plaintext-like DCRTPolys on-the-fly inside some recorded
+// operations (e.g. MultByMonomialInPlace). Those objects aren't user-tagged
+// inputs — so their backing polynomial data wouldn't otherwise be captured
+// for replay. OpenFHE pauses recording around the construction and then
+// fires this probe so the Niobium client can walk the poly, pin its
+// per-tower ids, allocate FHETCH addresses, and persist values. Delegates
+// to detail::save_dcrt_poly_as_input (defined in auto_facade.cpp next to the
+// other serialization helpers) so probes.cpp doesn't need to pull in
+// OpenFHE headers.
+void openfhe_cprobe_save_dcrt_poly(const void* dcrt_poly_ptr) {
+    niobium::detail::save_dcrt_poly_as_input(dcrt_poly_ptr);
 }
 
 }  // extern "C"
