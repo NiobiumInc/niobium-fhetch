@@ -26,6 +26,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -125,16 +126,15 @@ NB_WEAK std::shared_ptr<lbcrypto::SchemeBase<DCRTPoly>> unwrap_scheme(
 
 // ============================================================================
 // Additional probe functions referenced by the instrumented OpenFHE
+//
+// openfhe_cprobe_save_dcrt_poly lives in src/probes.cpp alongside the other
+// OpenFHE probe implementations.
 // ============================================================================
 
 extern "C" {
 
 void openfhe_cporbe_with_openmp(bool /*with_openmp*/) {
     // Signals OpenFHE's OpenMP state. No-op in client.
-}
-
-void openfhe_cprobe_save_dcrt_poly(const void* /*dcrt_poly_ptr*/) {
-    // DATA_TRACKING feature only — no-op in client.
 }
 
 }  // extern "C"
@@ -422,6 +422,85 @@ static size_t capture_dcrt_polys(Compiler& compiler,
     return count;
 }
 
+// Capture an OpenFHE-internal DCRTPoly as an input so its backing polynomial
+// is available at replay time. Called from src/probes.cpp's extern "C"
+// openfhe_cprobe_save_dcrt_poly, which OpenFHE fires from paths like
+// MultByMonomialInPlace for plaintext-like DCRTPolys constructed on-the-fly
+// inside a recorded operation. Mirrors niobium-compiler's
+// openfhe_cprobe_save_dcrt_poly, which tags the poly as input via
+// tag_input<DCRTPoly>.
+//
+// The parameter is a void* so the forward declaration in compiler_internal.h
+// doesn't drag OpenFHE headers into probes.cpp.
+}  // namespace niobium
+
+namespace niobium::detail {
+void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
+    if (!dcrt_poly_ptr) return;
+    const auto* dcrt = static_cast<const lbcrypto::DCRTPoly*>(dcrt_poly_ptr);
+
+    // Name keyed on pointer address, matching niobium-compiler's convention
+    // (e.g. "dcrtpoly_16bd1e2d8").
+    std::ostringstream name_stream;
+    name_stream << "dcrtpoly_" << std::hex
+                << reinterpret_cast<uintptr_t>(dcrt);
+    std::string name = name_stream.str();
+
+    // IMPORTANT: walk the ORIGINAL DCRTPoly's towers — do NOT copy it first.
+    // Copying constructs fresh NativePolys with new poly_ids, so the
+    // addresses we'd map wouldn't match the poly_ids the subsequent
+    // arithmetic probes (cv[i] *= *dcrt) actually use.
+    std::vector<uint64_t> addr_ids;
+    const auto& towers = dcrt->GetAllElements();
+    size_t zero_count = 0;
+    for (size_t ti = 0; ti < towers.size(); ++ti) {
+        const auto& poly = towers[ti];
+        uintptr_t poly_id = poly.GetId();
+        detail::pin_openfhe_id(poly_id);
+        uint64_t fhetch_addr = detail::ensure_fhetch_address(poly_id);
+        if (fhetch_addr == static_cast<uint64_t>(-1)) continue;
+
+        addr_ids.push_back(fhetch_addr);
+
+        uint64_t modulus = poly.GetModulus().ConvertToInt();
+        size_t n = poly.GetLength();
+        std::vector<uint64_t> vals(n);
+        const auto& vec = poly.GetValues();
+        bool any_nonzero = false;
+        for (size_t i = 0; i < n; ++i) {
+            vals[i] = vec[i].ConvertToInt();
+            if (vals[i] != 0) any_nonzero = true;
+        }
+        if (!any_nonzero) ++zero_count;
+
+        niobium::compiler().store_input_element(name, fhetch_addr, modulus, vals);
+    }
+
+    std::cout << "[NIOBIUM] captured " << name << ": " << towers.size()
+              << " polys";
+    if (zero_count) std::cout << "  (" << zero_count << " all-zero)";
+    std::cout << std::endl;
+
+    auto dir = niobium::compiler().get_program_directory();
+    std::filesystem::create_directories(dir);
+    std::string prog = niobium::compiler().program_name();
+
+    auto ids_path = dir / (prog + ".input_" + name + ".ids");
+    cereal_io::write_addr_ids(ids_path, addr_ids);
+
+    auto bin_path = dir / (prog + ".input_" + name + ".bin");
+    std::ofstream bin_stream(bin_path, std::ios::binary);
+    if (!bin_stream.is_open()) return;
+    cereal::PortableBinaryOutputArchive ar(bin_stream);
+    ar(static_cast<uint32_t>(1));   // instances_count
+    ar(static_cast<uint8_t>(2));    // payload_type: DCRTPOLY_PROXY
+    ar(static_cast<uint32_t>(1));   // elements_count
+    ar(*dcrt);
+}
+}  // namespace niobium::detail
+
+namespace niobium {
+
 // Helper: serialize eval keys to .bin via cereal + write .ids
 //
 // Format (stable — consumed by both tests/fhetch_driver/main.cpp's
@@ -529,12 +608,32 @@ void Compiler::tag_bootstrap_precompute<lbcrypto::CryptoContext<DCRTPoly>>(
     // Same traversal order as the compiler's write_bootstrap_precomp:
     // per-slot entry, then m_U0hatTPreFFT, m_U0PreFFT, m_U0Pre, m_U0hatTPre.
     std::vector<uint64_t> addr_ids;
+    // IMPORTANT: walk the plaintext's DCRTPoly by reference — do NOT copy it
+    // into a temporary vector first. Copying constructs fresh NativePolys
+    // with new poly_ids, so the addresses we'd map wouldn't match the
+    // poly_ids bootstrap actually reads later (EvalMultExt does
+    // `auto pt = plaintext->GetElement<DCRTPoly>()` which fires copy probes
+    // referencing the original plaintext's tower ids).
     auto capture_pt = [&](const auto& pt) {
         if (!pt) return;
         const auto& el = pt->template GetElement<lbcrypto::DCRTPoly>();
-        std::vector<DCRTPoly> one;
-        one.push_back(el);
-        capture_dcrt_polys(*this, "bootstrap_precompute", one, addr_ids);
+        const auto& towers = el.GetAllElements();
+        for (size_t ti = 0; ti < towers.size(); ++ti) {
+            const auto& poly = towers[ti];
+            uintptr_t poly_id = poly.GetId();
+            detail::pin_openfhe_id(poly_id);
+            uint64_t fhetch_addr = detail::ensure_fhetch_address(poly_id);
+            if (fhetch_addr == static_cast<uint64_t>(-1)) continue;
+            addr_ids.push_back(fhetch_addr);
+            uint64_t modulus = poly.GetModulus().ConvertToInt();
+            size_t n = poly.GetLength();
+            std::vector<uint64_t> vals(n);
+            const auto& vec = poly.GetValues();
+            for (size_t i = 0; i < n; ++i)
+                vals[i] = vec[i].ConvertToInt();
+            this->store_input_element("bootstrap_precompute", fhetch_addr,
+                                      modulus, vals);
+        }
     };
 
     auto range = [&](size_t from) {
