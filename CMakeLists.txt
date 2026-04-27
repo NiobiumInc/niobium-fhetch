@@ -54,8 +54,13 @@ set(OPENFHE_LIBRARIES
     OPENFHEpke
 )
 
-# nlohmann/json (header-only, single_include)
-set(JSON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/json/single_include")
+# nlohmann/json (header-only, single_include).
+# Cache var so a parent project (e.g. niobium-compiler) can inject its own
+# json submodule path via -DJSON_INCLUDE_DIR=... and we don't have to sync
+# our own vendor/json submodule. Empty cache value falls back to the local
+# vendored submodule for standalone builds.
+set(JSON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/json/single_include"
+    CACHE PATH "Path to nlohmann/json single_include directory")
 
 # ==============================================================================
 # Library sources
