@@ -48,9 +48,30 @@ endef
 VENDOR_DIR       := $(CURDIR)/vendor
 VENDOR_LIB_DIR   := $(VENDOR_DIR)/lib
 
-OPENFHE_DIR          := $(VENDOR_DIR)/openfhe
-OPENFHE_INSTALL_DIR  := $(VENDOR_LIB_DIR)/openfhe
+# Overridable by a parent build (niobium-client / niobium-compiler) so the
+# same source tree can be built either standalone (using vendored submodules)
+# or with deps supplied from outside. Use ?= so command-line / env wins.
+OPENFHE_DIR          ?= $(VENDOR_DIR)/openfhe
+OPENFHE_INSTALL_DIR  ?= $(VENDOR_LIB_DIR)/openfhe
+JSON_INCLUDE_DIR     ?=
 FHETCH_INSTALL_DIR   := $(VENDOR_LIB_DIR)/niobium-fhetch
+
+# When EXTERNAL_OPENFHE=1, the parent has already built+installed OpenFHE and
+# OPENFHE_INSTALL_DIR points at it; skip our own openfhe config/build steps.
+EXTERNAL_OPENFHE ?= 0
+ifeq ($(EXTERNAL_OPENFHE),1)
+  OPENFHE_BUILD_DEP_DEBUG    :=
+  OPENFHE_BUILD_DEP_RELEASE  :=
+  OPENFHE_CONFIG_DEP_DEBUG   :=
+  OPENFHE_CONFIG_DEP_RELEASE :=
+else
+  OPENFHE_BUILD_DEP_DEBUG    := build-openfhe
+  OPENFHE_BUILD_DEP_RELEASE  := build-openfhe-release
+  OPENFHE_CONFIG_DEP_DEBUG   := config-openfhe
+  OPENFHE_CONFIG_DEP_RELEASE := config-openfhe-release
+endif
+
+CMAKE_JSON_INCLUDE_DIR_FLAG := $(if $(JSON_INCLUDE_DIR),-DJSON_INCLUDE_DIR=$(JSON_INCLUDE_DIR))
 
 OPENMP    ?= OFF
 NATIVEOPT ?= OFF
@@ -148,6 +169,7 @@ config-fhetch: ## Configure the fhetch library + examples + tests (Debug, requir
 	cmake -S $(CURDIR) -B $(CURDIR)/dbuild \
 		-DCMAKE_BUILD_TYPE=Debug \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
+		$(CMAKE_JSON_INCLUDE_DIR_FLAG) \
 		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
 		-DNIOBIUM_FHETCH_WITH_TESTS=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
@@ -157,21 +179,22 @@ config-fhetch-release: ## Configure the fhetch library + examples + tests (Relea
 	cmake -S $(CURDIR) -B $(CURDIR)/build \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
+		$(CMAKE_JSON_INCLUDE_DIR_FLAG) \
 		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
 		-DNIOBIUM_FHETCH_WITH_TESTS=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
 
 ##@ Combined Targets
 
-config: config-openfhe config-fhetch ## Configure everything (Debug)
+config: $(OPENFHE_CONFIG_DEP_DEBUG) config-fhetch ## Configure everything (Debug)
 
-config-release: config-openfhe-release config-fhetch-release ## Configure everything (Release)
+config-release: $(OPENFHE_CONFIG_DEP_RELEASE) config-fhetch-release ## Configure everything (Release)
 
-build: build-openfhe ## Build everything (Debug)
+build: $(OPENFHE_BUILD_DEP_DEBUG) ## Build everything (Debug)
 	$(call set-build-config,Debug,dbuild)
 	cmake --build dbuild -j $(NUM_CPUS) --config Debug
 
-build-release: build-openfhe-release ## Build everything (Release)
+build-release: $(OPENFHE_BUILD_DEP_RELEASE) ## Build everything (Release)
 	$(call set-build-config,Release,build)
 	cmake --build build -j $(NUM_CPUS) --config Release
 
