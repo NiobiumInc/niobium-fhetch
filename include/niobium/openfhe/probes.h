@@ -155,6 +155,11 @@ void openfhe_cprobe_subi(uintptr_t dst, uintptr_t src, uint64_t immediate,
 void openfhe_cprobe_muli(uintptr_t dst, uintptr_t src, uint64_t immediate,
                          uint64_t modulus);
 
+/// Record: dst = src_acc + src_mul * immediate (mod modulus) (multiply-accumulate).
+void openfhe_cprobe_multacceq(uintptr_t dst, uintptr_t src_acc,
+                              uintptr_t src_mul, uint64_t immediate,
+                              uint64_t modulus);
+
 // ============================================================================
 // Transform and permutation operations
 // ============================================================================
@@ -180,6 +185,62 @@ void openfhe_cprobe_switchmodulus(uintptr_t dst, uintptr_t src,
                                  uint64_t root_of_unity_old,
                                  uint64_t root_of_unity_new,
                                  uint64_t ring_dim);
+
+// ============================================================================
+// Miscellaneous
+// ============================================================================
+
+/// Capture an OpenFHE-internal DCRTPoly (passed as a void pointer to the
+/// underlying lbcrypto::DCRTPoly) as a replay input. OpenFHE fires this
+/// from paths that construct plaintext-like polys on-the-fly inside a
+/// recorded operation (e.g. MultByMonomialInPlace) so their values are
+/// available to the simulator even though user code never tagged them.
+void openfhe_cprobe_save_dcrt_poly(const void* dcrt_poly_ptr);
+
+/// Signal OpenFHE's OpenMP state to the client. Note: historical typo in
+/// the function name ("cporbe" instead of "cprobe") — kept as-is because
+/// the symbol is already baked into the OpenFHE callsites.
+void openfhe_cporbe_with_openmp(bool with_openmp);
+
+// ============================================================================
+// DATA_TRACKING extensions (optional coefficient-level tracking; opt-in at
+// compile time via -DDATA_TRACKING=1).
+// ============================================================================
+#if DATA_TRACKING
+void openfhe_cprobe_enable_dcrt_context();
+void openfhe_cprobe_disable_dcrt_context();
+bool openfhe_cprobe_is_in_dcrt_context();
+
+void openfhe_cprobe_track_single_poly_add(const void* result_ptr,
+                                          const void* operand1_ptr,
+                                          const void* operand2_ptr,
+                                          uint64_t modulus);
+void openfhe_cprobe_track_single_poly_sub(const void* result_ptr,
+                                          const void* operand1_ptr,
+                                          const void* operand2_ptr,
+                                          uint64_t modulus);
+void openfhe_cprobe_track_single_poly_mul(const void* result_ptr,
+                                          const void* operand1_ptr,
+                                          const void* operand2_ptr,
+                                          uint64_t modulus);
+void openfhe_cprobe_track_single_poly_addi(const void* result_ptr,
+                                           const void* operand_ptr,
+                                           uint64_t immediate,
+                                           uint64_t modulus);
+void openfhe_cprobe_track_single_poly_muli(const void* result_ptr,
+                                           const void* operand_ptr,
+                                           uint64_t immediate,
+                                           uint64_t modulus);
+void openfhe_cprobe_track_single_poly_ntt(const void* result_ptr,
+                                          const void* operand_ptr,
+                                          uint64_t modulus);
+void openfhe_cprobe_track_single_poly_intt(const void* result_ptr,
+                                           const void* operand_ptr,
+                                           uint64_t modulus);
+void openfhe_cprobe_track_single_poly_switchmodulus(const void* result_ptr,
+                                                    uint64_t old_modulus,
+                                                    uint64_t new_modulus);
+#endif  // DATA_TRACKING
 
 #ifdef __cplusplus
 }
