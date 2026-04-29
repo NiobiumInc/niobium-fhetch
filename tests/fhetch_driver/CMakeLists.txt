@@ -7,7 +7,7 @@
 add_executable(fhetch_driver main.cpp)
 target_link_libraries(fhetch_driver PRIVATE niobium_fhetch)
 target_include_directories(fhetch_driver PRIVATE
-    "${CMAKE_SOURCE_DIR}/vendor/json/single_include"
+    "${JSON_INCLUDE_DIR}"
     "${CMAKE_SOURCE_DIR}/vendor/openfhe/third-party/cereal/include"
 )
 
