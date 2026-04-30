@@ -2,11 +2,20 @@
 // Licensed under the Apache License, Version 2.0.
 
 #include "niobium/compiler.h"
+#include "niobium/fhetch_api.h"
 #include "niobium/fhetch_sim/simulator.h"
 #include "compiler_internal.h"
 #include "trace_writer.h"
 
 #include <nlohmann/json.hpp>
+
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+// `environ` is POSIX-required globally but not declared by <unistd.h>
+// uniformly across platforms (Darwin needs the explicit extern).
+extern char** environ;
 
 #include <chrono>
 #include <cstring>
@@ -105,6 +114,10 @@ struct Compiler::Impl {
     // without forcing the user to call a specific API for it.
     std::function<void()> auto_capture_at_stop;
 
+    // Hook invoked by stop() after trace_writer.stop_recording() but before
+    // write_replay_json. Cleared by reset(); not by stop().
+    std::function<void()> post_recording_hook;
+
     // Derived program directory
     std::filesystem::path program_dir;
 
@@ -169,15 +182,10 @@ void Compiler::init(int& argc, char** argv) {
 bool Compiler::start() {
     if (impl_->running) return false;
 
-    // Auto-register any CC-derived precomputed data (e.g. CKKS bootstrap
-    // precompute) BEFORE recording begins — mirrors the compiler's
-    // Compiler::start() which calls pin_address + compact_address on every
-    // bootstrap precompute poly so they get compact ids in a contiguous
-    // block right after eval keys, ahead of any trace-intermediate polys.
-    if (impl_->auto_capture_at_stop) {
-        impl_->auto_capture_at_stop();
-        impl_->auto_capture_at_stop = nullptr;  // don't run twice
-    }
+    // Start each cycle from a clean trace + clean fhetch registries so
+    // multi-cycle drivers don't leak prior recordings forward.
+    impl_->trace_writer.clear();
+    niobium::fhetch::reset_for_epoch();
 
     impl_->running = true;
     impl_->stopped = false;
@@ -188,6 +196,10 @@ bool Compiler::start() {
 
 bool Compiler::stop() {
     if (!impl_->running) return false;
+    // Pull fhetch::tag_input / tag_output state into captured_inputs /
+    // captured_outputs so write_replay_json picks them up. No-op for the
+    // OpenFHE auto-facade flow (it populates captured_outputs directly).
+    niobium::detail::sync_fhetch_state_to_compiler();
     impl_->trace_writer.emit("halt");
     impl_->trace_writer.stop_recording();
     impl_->running = false;
@@ -203,6 +215,11 @@ bool Compiler::stop() {
     // "tag bootstrap precompute" API.
     if (impl_->auto_capture_at_stop) {
         impl_->auto_capture_at_stop();
+        impl_->auto_capture_at_stop = nullptr;  // don't run twice
+    }
+
+    if (impl_->post_recording_hook) {
+        impl_->post_recording_hook();
     }
 
     // Write fhetch_replay.json with inputs, outputs, and modulus table
@@ -316,8 +333,52 @@ void Compiler::clear_captured_inputs() {
     impl_->captured_inputs.clear();
 }
 
+void Compiler::clear_captured_outputs() {
+    impl_->captured_outputs.clear();
+}
+
+void Compiler::clear_captured() {
+    clear_captured_inputs();
+    clear_captured_outputs();
+}
+
 void Compiler::set_auto_capture_at_stop(std::function<void()> fn) {
     impl_->auto_capture_at_stop = std::move(fn);
+}
+
+void Compiler::set_post_recording_hook(std::function<void()> fn) {
+    impl_->post_recording_hook = std::move(fn);
+}
+
+void Compiler::reset() {
+    impl_->captured_inputs.clear();
+    impl_->captured_outputs.clear();
+    impl_->trace_writer.clear();
+    impl_->program_dir.clear();
+    impl_->last_trace_path.clear();
+    impl_->running = false;
+    impl_->stopped = false;
+    impl_->fhetch_mode = false;
+    impl_->epoch_id = 0;
+    impl_->modulus_chain.clear();
+    impl_->inverse_modulus_chain.clear();
+    impl_->scheme_name.clear();
+    impl_->security_level.clear();
+    impl_->ring_dimension = 0;
+    impl_->multiplicative_depth = 0;
+    impl_->scaling_mod_size = 0;
+    impl_->evalmult_start_addr_id = 0;
+    impl_->evalautomorphism_start_addr_id = 0;
+    impl_->cache_params.clear();
+    impl_->cache_suffix.clear();
+    impl_->program_name.clear();
+    impl_->program_version.clear();
+    impl_->program_description.clear();
+    impl_->source_file.clear();
+    impl_->source_line = 0;
+    impl_->build_timestamp.clear();
+    impl_->auto_capture_at_stop = nullptr;
+    impl_->post_recording_hook = nullptr;
 }
 
 void Compiler::store_input_element(const std::string& input_name,
@@ -423,14 +484,27 @@ uint32_t Compiler::epoch_id() const {
 
 bool Compiler::replay() {
     if (impl_->last_trace_path.empty()) {
-        // Look for an existing trace (cached)
+        // Look for an existing trace (cached) — canonical first, then the
+        // most recent per-epoch trace as a fallback.
         auto dir = get_program_directory();
-        auto path = dir / (impl_->full_program_name() + ".fhetch");
-        if (std::filesystem::exists(path)) {
-            impl_->last_trace_path = path;
+        auto canonical = dir / (impl_->full_program_name() + ".fhetch");
+        if (std::filesystem::exists(canonical)) {
+            impl_->last_trace_path = canonical;
         } else {
-            std::cerr << "[NIOBIUM] No trace file found for replay" << std::endl;
-            return false;
+            // Look for the most recent per-epoch trace.
+            auto epoch_dir = dir / ("epoch_" + std::to_string(
+                impl_->epoch_id == 0 ? 0 : impl_->epoch_id - 1));
+            auto epoch_trace = epoch_dir / (impl_->full_program_name() +
+                "_epoch_" + std::to_string(
+                    impl_->epoch_id == 0 ? 0 : impl_->epoch_id - 1) +
+                ".fhetch");
+            if (std::filesystem::exists(epoch_trace)) {
+                impl_->last_trace_path = epoch_trace;
+            } else {
+                std::cerr << "[NIOBIUM] No trace file found for replay (looked at "
+                          << canonical << " and " << epoch_trace << ")" << std::endl;
+                return false;
+            }
         }
     }
 
@@ -450,6 +524,14 @@ bool Compiler::replay() {
         return dispatch_to_compiler_target();
     }
 
+    return run_in_process_simulator();
+}
+
+// ============================================================================
+// run_in_process_simulator — execute trace via fhetch_sim::Simulator
+// ============================================================================
+
+bool Compiler::run_in_process_simulator() {
     // Cache-hit replay: the recording pass populated captured_outputs in
     // memory AND wrote <program>.outputs.json to disk. On a fresh process
     // start (e.g. the second run of an auto-facade workflow) the in-memory
@@ -652,15 +734,15 @@ bool Compiler::replay() {
     }
     std::cout << std::endl;
 
-    auto result = impl_->simulator->run();
+    auto sim_result = impl_->simulator->run();
 
-    if (result.errors > 0) {
-        std::cerr << "[NIOBIUM] Replay failed: " << result.errors << " errors" << std::endl;
+    if (sim_result.errors > 0) {
+        std::cerr << "[NIOBIUM] Replay failed: " << sim_result.errors << " errors" << std::endl;
         return false;
     }
 
-    std::cout << "[NIOBIUM] Replay complete: " << result.instructions_executed
-              << " instructions, " << result.elapsed_seconds << "s" << std::endl;
+    std::cout << "[NIOBIUM] Replay complete: " << sim_result.instructions_executed
+              << " instructions, " << sim_result.elapsed_seconds << "s" << std::endl;
 
     // Write output polynomial values for probe addresses
     write_replay_outputs();
@@ -670,6 +752,46 @@ bool Compiler::replay() {
     reconstruct_probes();
 
     return true;
+}
+
+// ============================================================================
+// write_replay_outputs — dump simulator memory to fhetch_replay_outputs.json
+// ============================================================================
+
+void Compiler::write_replay_outputs() {
+    using json = nlohmann::json;
+    if (!impl_->simulator || impl_->captured_outputs.empty()) return;
+
+    auto dir = get_program_directory();
+    auto path = dir / "fhetch_replay_outputs.json";
+
+    json root;
+    json outputs_arr = json::array();
+    for (const auto& output : impl_->captured_outputs) {
+        json out_entry;
+        out_entry["name"] = output.name;
+        json elems_arr = json::array();
+        for (size_t j = 0; j < output.addr_ids.size(); ++j) {
+            uint64_t addr = output.addr_ids[j];
+            auto values = impl_->simulator->get_polynomial(addr);
+            json elem;
+            elem["addr_id"] = addr;
+            elem["modulus"] = output.moduli[j];
+            elem["status"] = values.empty() ? "missing" : "computed";
+            elem["values"] = values;
+            elems_arr.push_back(elem);
+        }
+        out_entry["elements"] = elems_arr;
+        outputs_arr.push_back(out_entry);
+    }
+    root["outputs"] = outputs_arr;
+
+    std::ofstream out(path);
+    if (out.is_open()) {
+        out << root.dump(2) << std::endl;
+        out.close();
+        std::cout << "[NIOBIUM] Replay outputs written: " << path << std::endl;
+    }
 }
 
 // ============================================================================
@@ -696,16 +818,39 @@ bool Compiler::dispatch_to_compiler_target() {
         exec = "nbcc_fhetch_replay";
     }
 
-    // Build: <exec> --project=<dir> --target=<target>
-    // Pass shell-escaped args; the dir paths we produce contain no spaces.
-    std::string cmd = exec
-        + " --project=\"" + dir.string() + "\""
-        + " --target=\"" + impl_->target + "\"";
+    // posix_spawnp with explicit argv (rather than std::system with a
+    // shell-escaped string) avoids quoting hazards in paths containing
+    // metacharacters; PATH lookup semantics are preserved.
+    std::string project_arg = "--project=" + dir.string();
+    std::string target_arg = "--target=" + impl_->target;
+    char* argv[] = {
+        const_cast<char*>(exec.c_str()),
+        project_arg.data(),
+        target_arg.data(),
+        nullptr
+    };
 
     std::cout << "[NIOBIUM] Dispatching replay to compiler target '"
-              << impl_->target << "' via: " << cmd << std::endl;
+              << impl_->target << "' via: " << exec << " "
+              << project_arg << " " << target_arg << std::endl;
 
-    int rc = std::system(cmd.c_str());
+    pid_t pid = 0;
+    int spawn_err = ::posix_spawnp(&pid, exec.c_str(), nullptr, nullptr,
+                                   argv, environ);
+    int rc = -1;
+    if (spawn_err == 0) {
+        int status = 0;
+        if (::waitpid(pid, &status, 0) == pid) {
+            if (WIFEXITED(status)) {
+                rc = WEXITSTATUS(status);
+            } else if (WIFSIGNALED(status)) {
+                rc = 128 + WTERMSIG(status);
+            }
+        }
+    } else {
+        std::cerr << "[NIOBIUM] posix_spawnp failed: errno=" << spawn_err
+                  << std::endl;
+    }
     if (rc != 0) {
         std::cerr << "[NIOBIUM] nbcc_fhetch_replay failed (exit " << rc
                   << "). Is the binary on PATH, or NBCC_FHETCH_REPLAY set?"
@@ -913,46 +1058,6 @@ void Compiler::write_replay_json() {
 }
 
 // ============================================================================
-// write_replay_outputs — after simulation, write computed probe values
-// ============================================================================
-
-void Compiler::write_replay_outputs() {
-    using json = nlohmann::json;
-    if (!impl_->simulator || impl_->captured_outputs.empty()) return;
-
-    auto dir = get_program_directory();
-    auto path = dir / "fhetch_replay_outputs.json";
-
-    json root;
-    json outputs_arr = json::array();
-    for (const auto& output : impl_->captured_outputs) {
-        json out_entry;
-        out_entry["name"] = output.name;
-        json elems_arr = json::array();
-        for (size_t j = 0; j < output.addr_ids.size(); ++j) {
-            uint64_t addr = output.addr_ids[j];
-            auto values = impl_->simulator->get_polynomial(addr);
-            json elem;
-            elem["addr_id"] = addr;
-            elem["modulus"] = output.moduli[j];
-            elem["status"] = values.empty() ? "missing" : "computed";
-            elem["values"] = values;
-            elems_arr.push_back(elem);
-        }
-        out_entry["elements"] = elems_arr;
-        outputs_arr.push_back(out_entry);
-    }
-    root["outputs"] = outputs_arr;
-
-    std::ofstream out(path);
-    if (out.is_open()) {
-        out << root.dump(2) << std::endl;
-        out.close();
-        std::cout << "[NIOBIUM] Replay outputs written: " << path << std::endl;
-    }
-}
-
-// ============================================================================
 // State queries
 // ============================================================================
 
@@ -985,6 +1090,39 @@ Compiler::Impl& compiler_impl(Compiler& c) {
 }
 
 }  // namespace niobium
+
+namespace niobium::detail {
+
+// Iterate the Compiler's captured_inputs and call `cb` per polynomial
+// element. Lets OpenFHE-aware translation units (auto_facade.cpp) walk
+// haze-style inputs without including the private Impl layout.
+//
+// The local Impl reference is const so the iteration is structurally
+// read-only: the helpers themselves never mutate captured_inputs /
+// captured_outputs. A misbehaving callback could still mutate Compiler
+// state by reaching back through the niobium::compiler() singleton —
+// callers must not do that mid-iteration (it would invalidate the
+// vector iterator).
+void for_each_captured_input(
+    const std::function<void(const std::string&, uint64_t, uint64_t,
+                              const std::vector<uint64_t>&)>& cb) {
+    const auto& impl = niobium::compiler_impl(niobium::compiler());
+    for (const auto& input : impl.captured_inputs) {
+        for (const auto& elem : input.elements) {
+            cb(input.name, elem.addr_id, elem.modulus, elem.values);
+        }
+    }
+}
+
+void for_each_captured_output(
+    const std::function<void(const std::string&)>& cb) {
+    const auto& impl = niobium::compiler_impl(niobium::compiler());
+    for (const auto& output : impl.captured_outputs) {
+        cb(output.name);
+    }
+}
+
+}  // namespace niobium::detail
 
 // ============================================================================
 // Internal accessor for TraceWriter — used by fhetch_api.cpp and probes.cpp.

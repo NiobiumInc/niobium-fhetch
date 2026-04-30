@@ -1018,9 +1018,31 @@ MRPArray ckks_bootstrap(const MRPArray& ct_in, const MRPArray& /*aux_data*/) {
 // FILE I/O — JSON
 // ============================================================================
 
-bool save_polynomial_json(const Polynomial& /*p*/, const std::filesystem::path& /*file*/) {
-    // TODO: Implement JSON serialization
-    return false;
+bool save_polynomial_json(const Polynomial& p, const std::filesystem::path& file) {
+    if (!p.is_valid()) return false;
+    std::ofstream out(file);
+    if (!out) return false;
+    auto* impl = p.impl();
+    if (!impl) return false;
+    // Hand-rolled to keep nlohmann/json out of this TU; schema is the
+    // {"values":[...]} object haze's polynomial_io.cpp walks for.
+    out << "{\"ring_dim\":" << impl->ring_dim
+        << ",\"format\":" << static_cast<int>(impl->fmt)
+        << ",\"number_type\":" << static_cast<int>(impl->ntype)
+        << ",\"values\":[";
+    if (impl->ntype == NumberType::Integer) {
+        for (size_t i = 0; i < impl->int_data.size(); ++i) {
+            if (i > 0) out << ',';
+            out << impl->int_data[i];
+        }
+    } else {
+        for (size_t i = 0; i < impl->fp_data.size(); ++i) {
+            if (i > 0) out << ',';
+            out << impl->fp_data[i];
+        }
+    }
+    out << "]}";
+    return out.good();
 }
 
 bool load_polynomial_json(Polynomial& /*p*/, const std::filesystem::path& /*file*/) {

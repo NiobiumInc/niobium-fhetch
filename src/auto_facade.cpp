@@ -9,6 +9,7 @@
 // stubs so that the instrumented OpenFHE links and the probes fire.
 
 #include "niobium/compiler.h"
+#include "niobium/fhetch_api.h"
 
 #include "openfhe.h"
 #include "ciphertext-ser.h"
@@ -216,6 +217,62 @@ void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
               << " moduli=" << modulus_chain.size() << std::endl;
 }
 
+// Ciphertext serialization helpers shared by Compiler::tag_input<Ciphertext>
+// and probe<Ciphertext>. On-wire .bin layout matches niobium-compiler's
+// cereal_io: instances=1, payload_type=CIPHERTEXT(0), num_elements, then
+// each DCRTPoly.
+static bool write_ciphertext_input_files(
+    const std::string& input_name,
+    const lbcrypto::Ciphertext<DCRTPoly>& ct,
+    const std::vector<uint64_t>& addr_ids) {
+    auto dir = niobium::compiler().get_program_directory();
+    std::filesystem::create_directories(dir);
+    std::string prog = niobium::compiler().program_name();
+
+    auto ids_path = dir / (prog + ".input_" + input_name + ".ids");
+    if (!niobium::cereal_io::write_addr_ids(ids_path, addr_ids)) {
+        std::cerr << "[NIOBIUM] WARNING: Failed to write addr-id file "
+                  << ids_path << std::endl;
+        return false;
+    }
+
+    auto bin_path = dir / (prog + ".input_" + input_name + ".bin");
+    std::ofstream bin_stream(bin_path, std::ios::binary);
+    if (!bin_stream.is_open()) {
+        std::cerr << "[NIOBIUM] WARNING: Failed to open input bin "
+                  << bin_path << " for writing" << std::endl;
+        return false;
+    }
+    cereal::PortableBinaryOutputArchive ar(bin_stream);
+    ar(static_cast<uint32_t>(1));  // instances_count
+    // payload_type code must match niobium-compiler's
+    // niobium::cereal_io::PayloadTypeCode enum:
+    // CIPHERTEXT=0, PLAINTEXT=1, DCRTPOLY_PROXY=2,
+    // CIPHERTEXT_VECTOR=3, PLAINTEXT_VECTOR=4.
+    ar(static_cast<uint8_t>(0));   // payload_type: CIPHERTEXT
+    auto& elements = const_cast<std::vector<DCRTPoly>&>(ct->GetElements());
+    ar(static_cast<uint32_t>(elements.size()));
+    for (auto& dcrt : elements) ar(dcrt);
+    return bin_stream.good();
+}
+
+// Serialize a Ciphertext<DCRTPoly> shell to
+// <program_dir>/ciphertext_templates/<name>.template; the replay path fills
+// it from simulator output and re-emits as serialized_probes/<name>.ct.
+static bool write_ciphertext_template_file(
+    const std::string& name,
+    const lbcrypto::Ciphertext<DCRTPoly>& ct) {
+    auto dir = niobium::compiler().get_program_directory();
+    auto tdir = dir / "ciphertext_templates";
+    std::filesystem::create_directories(tdir);
+    auto path = tdir / (name + ".template");
+    if (!lbcrypto::Serial::SerializeToFile(path.string(), ct, lbcrypto::SerType::BINARY)) {
+        std::cerr << "[NIOBIUM] WARNING: Failed to write ciphertext template " << path << std::endl;
+        return false;
+    }
+    return true;
+}
+
 // Helper: collect addr_ids and coefficient data from a ciphertext
 static void capture_ciphertext_polys(niobium::Compiler& compiler,
                                      const std::string& name,
@@ -250,37 +307,11 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
     const std::string& input_name,
     lbcrypto::Ciphertext<DCRTPoly>& ct,
     std::optional<std::filesystem::path> /*file*/) {
-    auto dir = get_program_directory();
-    std::filesystem::create_directories(dir);
-    std::string prog = program_name();
-
     // Collect addr_ids and in-memory data
     std::vector<uint64_t> addr_ids;
     capture_ciphertext_polys(*this, input_name, ct, addr_ids);
 
-    // Write .ids file
-    auto ids_path = dir / (prog + ".input_" + input_name + ".ids");
-    cereal_io::write_addr_ids(ids_path, addr_ids);
-
-    // Write .bin file (cereal binary — same format as niobium-compiler)
-    auto bin_path = dir / (prog + ".input_" + input_name + ".bin");
-    {
-        std::ofstream bin_stream(bin_path, std::ios::binary);
-        if (bin_stream.is_open()) {
-            cereal::PortableBinaryOutputArchive ar(bin_stream);
-            ar(static_cast<uint32_t>(1));  // instances_count
-            // payload_type code must match niobium-compiler's
-            // niobium::cereal_io::PayloadTypeCode enum:
-            // CIPHERTEXT=0, PLAINTEXT=1, DCRTPOLY_PROXY=2,
-            // CIPHERTEXT_VECTOR=3, PLAINTEXT_VECTOR=4.
-            ar(static_cast<uint8_t>(0));   // payload_type: CIPHERTEXT
-            auto& elements = ct->GetElements();
-            ar(static_cast<uint32_t>(elements.size()));
-            for (auto& dcrt : elements) {
-                ar(dcrt);
-            }
-        }
-    }
+    write_ciphertext_input_files(input_name, ct, addr_ids);
 
     // Store reference for re-extraction at replay() time
     g_stored_ciphertexts.push_back(ct);
@@ -320,13 +351,7 @@ void Compiler::probe<lbcrypto::Ciphertext<DCRTPoly>>(
     // Save ciphertext template for result reconstruction after replay.
     // The template preserves the ciphertext structure (params, format, etc.)
     // so we can fill in simulator-computed polynomial values later.
-    auto dir = get_program_directory();
-    auto templates_dir = dir / "ciphertext_templates";
-    std::filesystem::create_directories(templates_dir);
-    auto template_path = templates_dir / (var_name + ".template");
-    if (!lbcrypto::Serial::SerializeToFile(template_path.string(), ct, lbcrypto::SerType::BINARY)) {
-        std::cerr << "[NIOBIUM] WARNING: Failed to save ciphertext template for " << var_name << std::endl;
-    }
+    write_ciphertext_template_file(var_name, ct);
 }
 
 // Debug verbosity: set NIOBIUM_DEBUG_CAPTURE=1 to print every captured poly.
@@ -805,10 +830,6 @@ void niobium::Compiler::refresh_all_inputs() {
 // reconstruct_probes() — fill ciphertext templates with simulator output
 // ============================================================================
 
-// reconstruct_probes() needs both Compiler::Impl (from compiler.cpp) and
-// OpenFHE types. We implement it here using the public API + fhetch_replay_outputs.json
-// rather than accessing Impl directly.
-
 void Compiler::reconstruct_probes() {
     // Re-entry guard. The Serial::{De,}SerializeFromFile calls below fire
     // the auto-facade's on_{de,}serialize_ciphertext hooks, which in turn
@@ -894,3 +915,144 @@ bool Compiler::result<lbcrypto::CryptoContext<DCRTPoly>, lbcrypto::Ciphertext<DC
 }
 
 }  // namespace niobium
+
+// niobium::detail forwarders for haze_replay_bridge. Cereal's polymorphic-type
+// registrations are per-shared-library, so the bridge can't call
+// Serial::SerializeToFile directly — empirically confirmed against
+// CryptoContextImpl and intnat::NativeVectorT. Routing through these
+// forwarders keeps the registrations in libnbfhetch's TU.
+namespace niobium::detail {
+
+bool write_ciphertext_template(
+    const std::string& name,
+    const lbcrypto::Ciphertext<DCRTPoly>& ct) {
+    return write_ciphertext_template_file(name, ct);
+}
+
+bool write_ciphertext_input_bin(
+    const std::string& name,
+    const lbcrypto::Ciphertext<DCRTPoly>& ct,
+    const std::vector<uint64_t>& addr_ids) {
+    return write_ciphertext_input_files(name, ct, addr_ids);
+}
+
+}  // namespace niobium::detail
+
+// ============================================================================
+// fhetch::result() free-function overloads — read serialized_probes/<name>.ct
+// and pull the first polynomial residue out as a fhetch::Polynomial / MRP /
+// MRPArray for clients that record raw polynomial ops.
+// ============================================================================
+
+namespace niobium::fhetch {
+
+namespace {
+
+// Convert OpenFHE's Format (utils/inttypes.h, global enum) to fhetch::Format.
+inline Format openfhe_to_fhetch_format(::Format fmt) {
+    return fmt == ::Format::COEFFICIENT ? Format::Coefficient : Format::Evaluation;
+}
+
+// Load <program_dir>/serialized_probes/<name>.ct as a Ciphertext<DCRTPoly>.
+// Returns nullptr on any I/O / parse error.
+lbcrypto::Ciphertext<DCRTPoly> load_serialized_probe(const std::string& name) {
+    auto dir = niobium::compiler().get_program_directory();
+    auto ct_path = dir / "serialized_probes" / (name + ".ct");
+    if (!std::filesystem::exists(ct_path)) {
+        std::cerr << "[fhetch::result] '" << name
+                  << "' not found at " << ct_path << std::endl;
+        return nullptr;
+    }
+    lbcrypto::Ciphertext<DCRTPoly> ct;
+    if (!lbcrypto::Serial::DeserializeFromFile(ct_path.string(), ct,
+                                               lbcrypto::SerType::BINARY)) {
+        std::cerr << "[fhetch::result] failed to deserialize " << ct_path
+                  << std::endl;
+        return nullptr;
+    }
+    return ct;
+}
+
+// Pull a single residue's coefficients out of a NativePoly as
+// std::vector<uint64_t>.
+std::vector<uint64_t> native_poly_values(const lbcrypto::NativePoly& np) {
+    const auto& vals = np.GetValues();
+    const size_t n = vals.GetLength();
+    std::vector<uint64_t> out;
+    out.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        out.push_back(vals[i].ConvertToInt());
+    }
+    return out;
+}
+
+}  // namespace
+
+bool result(const std::string& name, Polynomial& p) {
+    auto ct = load_serialized_probe(name);
+    if (!ct) return false;
+
+    const auto& elements = ct->GetElements();
+    if (elements.empty()) {
+        std::cerr << "[fhetch::result] '" << name << "' has no DCRTPoly elements"
+                  << std::endl;
+        return false;
+    }
+    const auto& towers = elements[0].GetAllElements();
+    if (towers.empty()) {
+        std::cerr << "[fhetch::result] '" << name << "' has no NativePoly towers"
+                  << std::endl;
+        return false;
+    }
+    const auto& np = towers[0];
+    auto values = native_poly_values(np);
+    p = Polynomial::from_data(values, values.size(),
+                              openfhe_to_fhetch_format(np.GetFormat()));
+    return true;
+}
+
+bool result(const std::string& name, MRP& m) {
+    auto ct = load_serialized_probe(name);
+    if (!ct) return false;
+
+    const auto& elements = ct->GetElements();
+    if (elements.empty()) return false;
+    const auto& towers = elements[0].GetAllElements();
+    if (towers.empty()) return false;
+
+    std::vector<std::pair<Polynomial, uint64_t>> pairs;
+    pairs.reserve(towers.size());
+    for (const auto& np : towers) {
+        auto values = native_poly_values(np);
+        auto poly = Polynomial::from_data(values, values.size(),
+                                          openfhe_to_fhetch_format(np.GetFormat()));
+        pairs.emplace_back(std::move(poly), np.GetModulus().ConvertToInt());
+    }
+    m = MRP::from_pairs(pairs);
+    return true;
+}
+
+bool result(const std::string& name, MRPArray& arr) {
+    auto ct = load_serialized_probe(name);
+    if (!ct) return false;
+
+    const auto& elements = ct->GetElements();
+    MRPArray out(elements.size());
+    for (size_t i = 0; i < elements.size(); ++i) {
+        const auto& dcrt = elements[i];
+        const auto& towers = dcrt.GetAllElements();
+        std::vector<std::pair<Polynomial, uint64_t>> pairs;
+        pairs.reserve(towers.size());
+        for (const auto& np : towers) {
+            auto values = native_poly_values(np);
+            auto poly = Polynomial::from_data(values, values.size(),
+                                              openfhe_to_fhetch_format(np.GetFormat()));
+            pairs.emplace_back(std::move(poly), np.GetModulus().ConvertToInt());
+        }
+        out[i] = MRP::from_pairs(pairs);
+    }
+    arr = std::move(out);
+    return true;
+}
+
+}  // namespace niobium::fhetch
