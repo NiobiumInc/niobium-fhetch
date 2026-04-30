@@ -511,14 +511,6 @@ bool Compiler::replay() {
         return dispatch_to_compiler_target();
     }
 
-    return run_in_process_simulator();
-}
-
-// ============================================================================
-// run_in_process_simulator — execute trace via fhetch_sim::Simulator
-// ============================================================================
-
-bool Compiler::run_in_process_simulator() {
     // Cache-hit replay: the recording pass populated captured_outputs in
     // memory AND wrote <program>.outputs.json to disk. On a fresh process
     // start (e.g. the second run of an auto-facade workflow) the in-memory
@@ -721,15 +713,15 @@ bool Compiler::run_in_process_simulator() {
     }
     std::cout << std::endl;
 
-    auto sim_result = impl_->simulator->run();
+    auto result = impl_->simulator->run();
 
-    if (sim_result.errors > 0) {
-        std::cerr << "[NIOBIUM] Replay failed: " << sim_result.errors << " errors" << std::endl;
+    if (result.errors > 0) {
+        std::cerr << "[NIOBIUM] Replay failed: " << result.errors << " errors" << std::endl;
         return false;
     }
 
-    std::cout << "[NIOBIUM] Replay complete: " << sim_result.instructions_executed
-              << " instructions, " << sim_result.elapsed_seconds << "s" << std::endl;
+    std::cout << "[NIOBIUM] Replay complete: " << result.instructions_executed
+              << " instructions, " << result.elapsed_seconds << "s" << std::endl;
 
     // Write output polynomial values for probe addresses
     write_replay_outputs();
@@ -739,46 +731,6 @@ bool Compiler::run_in_process_simulator() {
     reconstruct_probes();
 
     return true;
-}
-
-// ============================================================================
-// write_replay_outputs — dump simulator memory to fhetch_replay_outputs.json
-// ============================================================================
-
-void Compiler::write_replay_outputs() {
-    using json = nlohmann::json;
-    if (!impl_->simulator || impl_->captured_outputs.empty()) return;
-
-    auto dir = get_program_directory();
-    auto path = dir / "fhetch_replay_outputs.json";
-
-    json root;
-    json outputs_arr = json::array();
-    for (const auto& output : impl_->captured_outputs) {
-        json out_entry;
-        out_entry["name"] = output.name;
-        json elems_arr = json::array();
-        for (size_t j = 0; j < output.addr_ids.size(); ++j) {
-            uint64_t addr = output.addr_ids[j];
-            auto values = impl_->simulator->get_polynomial(addr);
-            json elem;
-            elem["addr_id"] = addr;
-            elem["modulus"] = output.moduli[j];
-            elem["status"] = values.empty() ? "missing" : "computed";
-            elem["values"] = values;
-            elems_arr.push_back(elem);
-        }
-        out_entry["elements"] = elems_arr;
-        outputs_arr.push_back(out_entry);
-    }
-    root["outputs"] = outputs_arr;
-
-    std::ofstream out(path);
-    if (out.is_open()) {
-        out << root.dump(2) << std::endl;
-        out.close();
-        std::cout << "[NIOBIUM] Replay outputs written: " << path << std::endl;
-    }
 }
 
 // ============================================================================
@@ -1041,6 +993,46 @@ void Compiler::write_replay_json() {
         out << replay.dump(2) << std::endl;
         out.close();
         std::cout << "[NIOBIUM] Replay JSON written: " << path << std::endl;
+    }
+}
+
+// ============================================================================
+// write_replay_outputs — after simulation, write computed probe values
+// ============================================================================
+
+void Compiler::write_replay_outputs() {
+    using json = nlohmann::json;
+    if (!impl_->simulator || impl_->captured_outputs.empty()) return;
+
+    auto dir = get_program_directory();
+    auto path = dir / "fhetch_replay_outputs.json";
+
+    json root;
+    json outputs_arr = json::array();
+    for (const auto& output : impl_->captured_outputs) {
+        json out_entry;
+        out_entry["name"] = output.name;
+        json elems_arr = json::array();
+        for (size_t j = 0; j < output.addr_ids.size(); ++j) {
+            uint64_t addr = output.addr_ids[j];
+            auto values = impl_->simulator->get_polynomial(addr);
+            json elem;
+            elem["addr_id"] = addr;
+            elem["modulus"] = output.moduli[j];
+            elem["status"] = values.empty() ? "missing" : "computed";
+            elem["values"] = values;
+            elems_arr.push_back(elem);
+        }
+        out_entry["elements"] = elems_arr;
+        outputs_arr.push_back(out_entry);
+    }
+    root["outputs"] = outputs_arr;
+
+    std::ofstream out(path);
+    if (out.is_open()) {
+        out << root.dump(2) << std::endl;
+        out.close();
+        std::cout << "[NIOBIUM] Replay outputs written: " << path << std::endl;
     }
 }
 
