@@ -1094,8 +1094,8 @@ Compiler::Impl& compiler_impl(Compiler& c) {
 namespace niobium::detail {
 
 // Iterate the Compiler's captured_inputs and call `cb` per polynomial
-// element. Lets OpenFHE-aware translation units (auto_facade.cpp) walk
-// haze-style inputs without including the private Impl layout.
+// element. Lets external translation units walk per-input state without
+// including the private Impl layout.
 //
 // The local Impl reference is const so the iteration is structurally
 // read-only: the helpers themselves never mutate captured_inputs /
