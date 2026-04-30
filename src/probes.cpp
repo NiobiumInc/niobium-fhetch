@@ -38,6 +38,11 @@ static std::unordered_map<uintptr_t, int> g_refcount;  // openfhe_id -> live ref
 static bool g_suppressed = false;
 static thread_local bool g_serialization_thread = false;
 
+// tracking of hollow mode across pauses 
+// this is deliberatly not thread local. pausing in a multi-threaded setting
+// is brittle at best. it only works correctly if there no ciphertext parallelism
+static bool g_hollow_before_pause = false;
+
 // Debug: track the lifecycle of a specific FHETCH address.
 // Set via NIOBIUM_TRACK_ADDR=65574 to follow what probe activity is
 // associated with that address.
@@ -141,11 +146,16 @@ void openfhe_cprobe_execute() {
 }
 
 void openfhe_cprobe_pause_recording() {
+    g_hollow_before_pause = niobium::compiler().is_hollow_mode();
+    // hollow mode needs to be off during pauses so we can correctly capture operations
+    niobium::compiler().enable_hollow_mode(false);
     niobium::compiler().pause();
 }
 
 void openfhe_cprobe_resume_recording() {
     niobium::compiler().resume();
+    // turn hollow mode back on if it was before the pause
+    niobium::compiler().enable_hollow_mode(g_hollow_before_pause);
 }
 
 void openfhe_cprobe_annotate(const char* annotation) {
