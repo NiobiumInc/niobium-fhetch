@@ -484,27 +484,14 @@ uint32_t Compiler::epoch_id() const {
 
 bool Compiler::replay() {
     if (impl_->last_trace_path.empty()) {
-        // Look for an existing trace (cached) — canonical first, then the
-        // most recent per-epoch trace as a fallback.
+        // Look for an existing trace (cached)
         auto dir = get_program_directory();
-        auto canonical = dir / (impl_->full_program_name() + ".fhetch");
-        if (std::filesystem::exists(canonical)) {
-            impl_->last_trace_path = canonical;
+        auto path = dir / (impl_->full_program_name() + ".fhetch");
+        if (std::filesystem::exists(path)) {
+            impl_->last_trace_path = path;
         } else {
-            // Look for the most recent per-epoch trace.
-            auto epoch_dir = dir / ("epoch_" + std::to_string(
-                impl_->epoch_id == 0 ? 0 : impl_->epoch_id - 1));
-            auto epoch_trace = epoch_dir / (impl_->full_program_name() +
-                "_epoch_" + std::to_string(
-                    impl_->epoch_id == 0 ? 0 : impl_->epoch_id - 1) +
-                ".fhetch");
-            if (std::filesystem::exists(epoch_trace)) {
-                impl_->last_trace_path = epoch_trace;
-            } else {
-                std::cerr << "[NIOBIUM] No trace file found for replay (looked at "
-                          << canonical << " and " << epoch_trace << ")" << std::endl;
-                return false;
-            }
+            std::cerr << "[NIOBIUM] No trace file found for replay" << std::endl;
+            return false;
         }
     }
 
