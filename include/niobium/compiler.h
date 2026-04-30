@@ -288,11 +288,27 @@ public:
     /// Clear all captured input data (called before refresh).
     void clear_captured_inputs();
 
+    /// Clear all captured output probe data.
+    void clear_captured_outputs();
+
+    /// Clear both captured inputs and outputs (end-of-cycle convenience).
+    void clear_captured();
+
     /// Register a callback to run inside stop() right before the replay
     /// index is written. Used by capture_crypto_context() template
     /// specializations to auto-capture CC-derived precomputed data
     /// (e.g. CKKS bootstrap precompute) without a user-facing API.
     void set_auto_capture_at_stop(std::function<void()> fn);
+
+    /// Register a callback to run inside stop() AFTER trace_writer.stop_recording()
+    /// but BEFORE write_replay_json. Lets downstream layers do OpenFHE work
+    /// without polluting the trace. Pass nullptr to clear; reset() also clears.
+    void set_post_recording_hook(std::function<void()> fn);
+
+    /// Clear all per-program singleton state (captured inputs/outputs,
+    /// trace writer, program_dir, recording flags, hooks). Does NOT touch
+    /// hollow_mode, multithreaded, or target.
+    void reset();
 
     // Internal: store captured input polynomial data for replay.
     // Called by the tag_input template instantiation.
@@ -307,12 +323,16 @@ public:
 
 private:
     void write_replay_json();
-    void write_replay_outputs();
 
     /// Hand the recorded fhetch project off to the compiler-side
     /// nbcc_fhetch_replay executable (used when --target=<non-local>).
     /// Returns true if the external driver succeeded and probes were written.
     bool dispatch_to_compiler_target();
+
+    /// Run the in-process FHETCH simulator on the recorded trace.
+    bool run_in_process_simulator();
+
+    void write_replay_outputs();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

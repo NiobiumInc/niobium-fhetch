@@ -9,7 +9,10 @@
 
 #include "trace_writer.h"
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 namespace niobium::detail {
 
@@ -59,6 +62,15 @@ void sync_fhetch_state_to_compiler();
 /// probe entry point openfhe_cprobe_save_dcrt_poly in probes.cpp delegates
 /// here.
 void save_dcrt_poly_as_input(const void* dcrt_poly_ptr);
+
+/// Iterate captured inputs: cb(name, addr_id, modulus, values) per element.
+void for_each_captured_input(
+    const std::function<void(const std::string&, uint64_t, uint64_t,
+                              const std::vector<uint64_t>&)>& cb);
+
+/// Iterate captured outputs: cb(name) once per distinct output.
+void for_each_captured_output(
+    const std::function<void(const std::string&)>& cb);
 
 }  // namespace niobium::detail
 
