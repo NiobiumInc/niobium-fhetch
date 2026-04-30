@@ -1024,8 +1024,8 @@ bool save_polynomial_json(const Polynomial& p, const std::filesystem::path& file
     if (!out) return false;
     auto* impl = p.impl();
     if (!impl) return false;
-    // Hand-rolled to keep nlohmann/json out of this TU; schema is the
-    // {"values":[...]} object haze's polynomial_io.cpp walks for.
+    // Hand-rolled to keep nlohmann/json out of this TU; schema is a
+    // {"values":[...]} object that downstream readers can walk.
     out << "{\"ring_dim\":" << impl->ring_dim
         << ",\"format\":" << static_cast<int>(impl->fmt)
         << ",\"number_type\":" << static_cast<int>(impl->ntype)

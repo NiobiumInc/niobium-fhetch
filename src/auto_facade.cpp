@@ -916,11 +916,12 @@ bool Compiler::result<lbcrypto::CryptoContext<DCRTPoly>, lbcrypto::Ciphertext<DC
 
 }  // namespace niobium
 
-// niobium::detail forwarders for haze_replay_bridge. Cereal's polymorphic-type
-// registrations are per-shared-library, so the bridge can't call
-// Serial::SerializeToFile directly — empirically confirmed against
-// CryptoContextImpl and intnat::NativeVectorT. Routing through these
-// forwarders keeps the registrations in libnbfhetch's TU.
+// niobium::detail forwarders for downstream libraries that need to write
+// the same Ciphertext on-wire format. Cereal's polymorphic-type
+// registrations are per-shared-library, so callers outside libnbfhetch
+// cannot invoke Serial::SerializeToFile directly — empirically confirmed
+// against CryptoContextImpl and intnat::NativeVectorT. Routing through
+// these forwarders keeps the registrations in libnbfhetch's TU.
 namespace niobium::detail {
 
 bool write_ciphertext_template(
