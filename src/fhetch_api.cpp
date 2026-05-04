@@ -19,6 +19,7 @@
 #include <map>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace niobium::fhetch {
 
@@ -900,34 +901,250 @@ MRP mr_subset(const MRP& x, const ModuliBase& subbase) {
 // ============================================================================
 // GADGETS — Fast Base Conversion and CKKS Rescale
 // ============================================================================
+//
+// Ported from the canonical niobium-compiler implementation
+// (niobium-compiler/src/FhetchApi.cpp). The original libnbfhetch stub here
+// emitted `sr_mulps(x[q], 1, p)` + `sr_addp` per (q, p) pair — a placeholder
+// that produced sum_q(x[q] mod p) instead of the CRT-correct
+// sum_i((x[q_i] * q_hat[i]) mod q_i) * q_star[i,p] mod p, and lacked
+// pass-through for shared primes. Two adaptations from the canonical
+// generator-based source:
+//   1. `mod_arith::*` helpers don't ship with libnbfhetch; inlined below.
+//   2. The simulator (fhetch_sim/simulator.cpp) has no SR_SWITCHMODULUS
+//      opcode, so center_mod_q_into_p is lowered into 3 sr_* ops
+//      (shift/rebase/unshift) using the available primitives.
 
-MRP fast_base_convert(const MRP& x, const ModuliBase& target_base) {
-    uint64_t ring_dim = x.impl()->ring_dim_;
-    MRP z(target_base, ring_dim);
-    for (auto q : x.base()) {
-        auto scaled = x[q];
-        for (auto p : target_base) {
-            auto temp = sr_mulps(scaled, Scalar::from_int(1), p);
-            z[p] = sr_addp(z[p], temp, p);
-        }
-    }
-    return z;
+namespace {
+
+// Modular multiplication via __uint128_t — required because primes are ~60 bits.
+inline uint64_t mulmod_u64(uint64_t a, uint64_t b, uint64_t m) {
+    return static_cast<uint64_t>((static_cast<__uint128_t>(a) * b) % m);
 }
 
-MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base) {
+// Modular exponentiation. Used by modinv_prime for Fermat's little theorem.
+inline uint64_t powmod_u64(uint64_t a, uint64_t e, uint64_t m) {
+    uint64_t r = 1U % m;
+    a %= m;
+    while (e > 0U) {
+        if ((e & 1U) != 0U) r = mulmod_u64(r, a, m);
+        a = mulmod_u64(a, a, m);
+        e >>= 1U;
+    }
+    return r;
+}
+
+// Modular inverse of a mod prime p, via Fermat: a^(p-2) mod p. Caller
+// guarantees p is prime and gcd(a, p) == 1.
+inline uint64_t modinv_prime(uint64_t a, uint64_t p) {
+    return powmod_u64(a % p, p - 2U, p);
+}
+
+// Product of every prime in `base` reduced mod `m`. Replaces
+// niobium-compiler's mod_arith::prod_mod.
+inline uint64_t prod_mod(const ModuliBase& base, uint64_t m) {
+    uint64_t r = 1U % m;
+    for (uint64_t q : base) r = mulmod_u64(r, q % m, m);
+    return r;
+}
+
+// Product of every prime in `base` except `base[skip]`, reduced mod `m`.
+// Replaces niobium-compiler's mod_arith::prod_mod_skip_index.
+inline uint64_t prod_mod_skip_index(const ModuliBase& base, size_t skip, uint64_t m) {
+    uint64_t r = 1U % m;
+    for (size_t i = 0; i < base.size(); ++i) {
+        if (i == skip) continue;
+        r = mulmod_u64(r, base[i] % m, m);
+    }
+    return r;
+}
+
+// q_hat[i] = (Q/q_i)^{-1} mod q_i, where Q = prod(source_base).
+std::vector<uint64_t> q_hat_inv_mod_q(const ModuliBase& source_base) {
+    std::vector<uint64_t> q_hat(source_base.size());
+    for (size_t i = 0; i < source_base.size(); ++i) {
+        const uint64_t q_i = source_base[i];
+        const uint64_t Q_div_qi_mod_qi = prod_mod_skip_index(source_base, i, q_i);
+        q_hat[i] = modinv_prime(Q_div_qi_mod_qi, q_i);
+    }
+    return q_hat;
+}
+
+// q_star[i] = (Q/q_i) mod target_p, one entry per source prime.
+std::vector<uint64_t> q_hat_mod_p(const ModuliBase& source_base, uint64_t target_p) {
+    std::vector<uint64_t> q_star(source_base.size());
+    for (size_t i = 0; i < source_base.size(); ++i) {
+        q_star[i] = prod_mod_skip_index(source_base, i, target_p);
+    }
+    return q_star;
+}
+
+// scaled[i] = (x[q_i] * q_hat[i]) mod q_i. Emits one sr_mulps per source prime.
+std::vector<Polynomial> prescale_by_q_hat(const MRP& x, const std::vector<uint64_t>& q_hat) {
+    const ModuliBase& source_base = x.base();
+    std::vector<Polynomial> scaled;
+    scaled.reserve(source_base.size());
+    for (size_t i = 0; i < source_base.size(); ++i) {
+        scaled.push_back(sr_mulps(x[source_base[i]], Scalar::from_int(q_hat[i]), source_base[i]));
+    }
+    return scaled;
+}
+
+// Center scaled_i mod q_i (signed-preserving) and rebase to mod target_p.
+// niobium-compiler's generator emits a single `switchmodulus` IR op that the
+// hardware/optimizer lowers to four scalar instructions; libnbfhetch's
+// simulator has no such opcode, so we lower to 3 available sr_* ops directly:
+//   shifted   = (scaled + halfQ_i)   mod q_i      (sr_addps)
+//   rebased   = shifted              mod target_p (sr_mulps with imm=1)
+//   unshifted = (rebased + (-halfQ_i mod p)) mod p (sr_addps with additive inverse)
+// For scaled in [0, halfQ]:    unshifted = scaled mod p              (centered ≥ 0)
+// For scaled in (halfQ, q_i):  unshifted = (scaled - q_i) mod p      (centered < 0)
+Polynomial center_mod_q_into_p(const Polynomial& scaled_i, uint64_t q_i, uint64_t target_p) {
+    const uint64_t halfQ = (q_i - 1U) / 2U;
+    auto shifted = sr_addps(scaled_i, Scalar::from_int(halfQ), q_i);
+    auto rebased = sr_mulps(shifted, Scalar::from_int(1), target_p);
+    const uint64_t neg_half_mod_p = (target_p - (halfQ % target_p)) % target_p;
+    return sr_addps(rebased, Scalar::from_int(neg_half_mod_p), target_p);
+}
+
+// One term of the FBC sum at target prime p:
+//   Standard:     (scaled[i] mod p) * q_star[i] mod p
+//   ReducedNoise: (center_qi(scaled[i]) mod p) * q_star[i] mod p
+Polynomial fbc_term(const Polynomial& scaled_i, uint64_t q_i, uint64_t target_p,
+                    uint64_t q_star_i, FbcVariant variant) {
+    Polynomial coeff = scaled_i;
+    if (variant == FbcVariant::ReducedNoise) {
+        coeff = center_mod_q_into_p(scaled_i, q_i, target_p);
+    }
+    return sr_mulps(coeff, Scalar::from_int(q_star_i), target_p);
+}
+
+// y[p] = sum_i fbc_term_i (mod p). Seeds with term 0 so the first write is a
+// real instruction (avoids leaving an add-against-zero seed for DCE to elide).
+Polynomial sum_fbc_terms(const std::vector<Polynomial>& scaled, const ModuliBase& source_base,
+                         uint64_t target_p, const std::vector<uint64_t>& q_star,
+                         FbcVariant variant) {
+    Polynomial acc = fbc_term(scaled[0], source_base[0], target_p, q_star[0], variant);
+    for (size_t i = 1; i < source_base.size(); ++i) {
+        Polynomial term = fbc_term(scaled[i], source_base[i], target_p, q_star[i], variant);
+        acc = sr_addp(acc, term, target_p);
+    }
+    return acc;
+}
+
+// Pass-through copy via sr_addps with imm=0 and the COPY_SENTINEL modulus
+// (0xFFFF...FF). remember_modulus already special-cases this sentinel so it
+// doesn't pollute the address-modulus map; the simulator's exec_addps with
+// imm=0 does a vector copy regardless of q.
+Polynomial copy_residue(const Polynomial& src) {
+    return sr_addps(src, Scalar::from_int(0), /*q=*/0xFFFFFFFFFFFFFFFFULL);
+}
+
+// target_base = source_base \ rescale_base, preserving source_base order.
+ModuliBase target_after_rescale(const ModuliBase& source_base, const ModuliBase& rescale_base) {
+    const std::unordered_set<uint64_t> rescale_set(rescale_base.begin(), rescale_base.end());
     ModuliBase target_base;
-    for (auto q : x.base()) {
-        if (std::find(rescale_base.begin(), rescale_base.end(), q) == rescale_base.end())
-            target_base.push_back(q);
+    target_base.reserve(source_base.size());
+    for (uint64_t q : source_base) {
+        if (rescale_set.find(q) == rescale_set.end()) target_base.push_back(q);
     }
-    MRP y = fast_base_convert(x, target_base);
-    uint64_t ring_dim = x.impl()->ring_dim_;
-    MRP z(target_base, ring_dim);
-    for (auto q : target_base) {
-        auto temp = sr_subp(x[q], y[q], q);
-        z[q] = sr_mulps(temp, Scalar::from_int(1), q);
+    return target_base;
+}
+
+// P_inv[i] = (prod(rescale_base))^{-1} mod target_base[i].
+std::vector<uint64_t> P_inv_mod_q(const ModuliBase& rescale_base, const ModuliBase& target_base) {
+    std::vector<uint64_t> P_inv(target_base.size());
+    for (size_t i = 0; i < target_base.size(); ++i) {
+        const uint64_t q = target_base[i];
+        P_inv[i] = modinv_prime(prod_mod(rescale_base, q), q);
     }
-    return z;
+    return P_inv;
+}
+
+// z[q] = (x[q] - y[q]) * P_inv (mod q).
+Polynomial rescale_residue(const Polynomial& x_q, const Polynomial& y_q, uint64_t q,
+                           uint64_t P_inv_q) {
+    Polynomial diff = sr_subp(x_q, y_q, q);
+    return sr_mulps(diff, Scalar::from_int(P_inv_q), q);
+}
+
+}  // namespace
+
+// Approximate fast base conversion. Math:
+//   q_hat   = (Q/q_i)^{-1} mod q_i              for each source prime q_i
+//   scaled  = x[q_i] * q_hat[i]   (mod q_i)     for each i
+//   for each target prime p:
+//     if p in source_base:  y[p] = copy(x[p])              (pass-through)
+//     else:                 y[p] = sum_i fbc_term_i(p)     (mod p)
+//
+// Source primes that overlap the target are passed through unchanged. The FBC
+// sum at those primes would otherwise mix x[p] with noise from j != p,
+// breaking dig_decomp's invariant that the lifted value equals the original
+// at the digit's own primes.
+//
+// Reference: Cheon-Han-Kim-Kim-Song SAC 2018 §4.1 (BasisExtension).
+MRP fast_base_convert(const MRP& x, const ModuliBase& target_base, FbcVariant variant) {
+    const ModuliBase& source_base = x.base();
+    std::vector<std::pair<Polynomial, uint64_t>> pairs;
+    pairs.reserve(target_base.size());
+
+    if (source_base.empty()) {
+        for (uint64_t p : target_base) {
+            pairs.emplace_back(Polynomial::zeros(x.impl()->ring_dim_), p);
+        }
+        return MRP::from_pairs(pairs);
+    }
+
+    const auto q_hat = q_hat_inv_mod_q(source_base);
+    const auto scaled = prescale_by_q_hat(x, q_hat);
+
+    const std::unordered_set<uint64_t> source_set(source_base.begin(), source_base.end());
+    for (uint64_t p : target_base) {
+        if (source_set.find(p) != source_set.end()) {
+            pairs.emplace_back(copy_residue(x[p]), p);
+            continue;
+        }
+        const auto q_star = q_hat_mod_p(source_base, p);
+        pairs.emplace_back(sum_fbc_terms(scaled, source_base, p, q_star, variant), p);
+    }
+    return MRP::from_pairs(pairs);
+}
+
+// 2-arg overload defaults to ReducedNoise — the variant that matches the
+// niobium-instrumented OpenFHE built with WITH_REDUCED_NOISE=ON.
+MRP fast_base_convert(const MRP& x, const ModuliBase& target_base) {
+    return fast_base_convert(x, target_base, FbcVariant::ReducedNoise);
+}
+
+// Approximate mod-down (CKKS rescale). Math:
+//   target_base = x.base() \ rescale_base
+//   y           = fast_base_convert(x|_rescale_base, target_base)
+//   z[q]        = (x[q] - y[q]) * (P^{-1} mod q)   (mod q)   for q in target
+// where P = prod(rescale_base).
+//
+// Reference: Cheon-Han-Kim-Kim-Song SAC 2018 §4.2 (ModulusReduction). Same
+// algorithm as lbcrypto::DCRTPolyImpl::ApproxModDown.
+MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base, FbcVariant variant) {
+    assert(!rescale_base.empty() && "rescale_base must be non-empty");
+    const ModuliBase target_base = target_after_rescale(x.base(), rescale_base);
+    assert(target_base.size() < x.base().size() &&
+           "rescale_base must be a proper subset of x.base()");
+
+    const MRP x_rescale = mr_subset(x, rescale_base);
+    const MRP y = fast_base_convert(x_rescale, target_base, variant);
+    const auto P_inv = P_inv_mod_q(rescale_base, target_base);
+
+    std::vector<std::pair<Polynomial, uint64_t>> pairs;
+    pairs.reserve(target_base.size());
+    for (size_t i = 0; i < target_base.size(); ++i) {
+        const uint64_t q = target_base[i];
+        pairs.emplace_back(rescale_residue(x[q], y[q], q, P_inv[i]), q);
+    }
+    return MRP::from_pairs(pairs);
+}
+
+// 2-arg overload — same ReducedNoise default rationale as fast_base_convert.
+MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base) {
+    return rescale_fbc(x, rescale_base, FbcVariant::ReducedNoise);
 }
 
 // ============================================================================
