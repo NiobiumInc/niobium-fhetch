@@ -157,7 +157,13 @@ int main(int argc, char* argv[]) {
 
         auto w_coeff = fhetch::mr_intt(w_aut);
         std::cout << "  mr_intt(w_aut) -> w_coeff" << std::endl;
-        fhetch::tag_output("w_coeff", w_coeff);
+
+        // Negacyclic rotation in coefficient representation. Distinct op
+        // from mr_automorph_eval above (that one permutes eval-form
+        // slots; this one shifts coefficients with sign flips).
+        auto w_rot = fhetch::mr_rot_automorph_coeff(w_coeff, 1);
+        std::cout << "  mr_rot_automorph_coeff(w_coeff, 1) -> w_rot" << std::endl;
+        fhetch::tag_output("w_rot", w_rot);
 
         // ---- MRP Array dot product ----
         std::cout << "\n--- MRPA dot product ---" << std::endl;

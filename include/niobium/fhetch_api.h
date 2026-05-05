@@ -640,9 +640,17 @@ MRP mr_intt(const MRP& x);
 /// pure permutation of the 2N-th-root-of-unity evaluation slots and is
 /// independent of q (sr_automorph_eval uses COPY_MODULUS), so the per-
 /// residue lift is trivial. This is NOT the same as
-/// sr_rot_automorph_coeff: that op operates in coefficient form and
+/// mr_rot_automorph_coeff: that op operates in coefficient form and
 /// performs a negacyclic shift; this op permutes evaluation-form slots.
 MRP mr_automorph_eval(const MRP& x, uint64_t k);
+
+/// MRP negacyclic rotation in coefficient representation:
+///   z[q] = sr_rot_automorph_coeff(x[q], offset, q)
+/// for every q in x.base(). `offset` is in [0, N-1] and shifts coefficients
+/// cyclically with a sign flip on wraparound (X^N = -1). Operates on
+/// coefficient-form polys; the eval-form Galois automorphism above is the
+/// separate op for slot rotation.
+MRP mr_rot_automorph_coeff(const MRP& x, uint64_t offset);
 
 /// Construct a zero-initialized MRP with the given base and ring dimension.
 MRP mr_zeros(const ModuliBase& target_base, uint64_t ring_dim);

@@ -874,6 +874,13 @@ MRP mr_automorph_eval(const MRP& x, uint64_t k) {
     return z;
 }
 
+MRP mr_rot_automorph_coeff(const MRP& x, uint64_t offset) {
+    const auto& base = x.base();
+    MRP z(base, x[base[0]].ring_dimension());
+    for (auto q : base) z[q] = sr_rot_automorph_coeff(x[q], offset, q);
+    return z;
+}
+
 MRP mr_zeros(const ModuliBase& target_base, uint64_t ring_dim) {
     return MRP(target_base, ring_dim);
 }
