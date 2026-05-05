@@ -634,6 +634,16 @@ MRP mr_ntt(const MRP& x);
 /// MRP inverse NTT: apply sr_intt to each residue.
 MRP mr_intt(const MRP& x);
 
+/// MRP Galois automorphism (X -> X^k) in evaluation representation:
+///   z[q] = sr_automorph_eval(x[q], k)
+/// for every q in x.base(). k must be odd in [1, 2N-1]. The action is a
+/// pure permutation of the 2N-th-root-of-unity evaluation slots and is
+/// independent of q (sr_automorph_eval uses COPY_MODULUS), so the per-
+/// residue lift is trivial. This is NOT the same as
+/// sr_rot_automorph_coeff: that op operates in coefficient form and
+/// performs a negacyclic shift; this op permutes evaluation-form slots.
+MRP mr_automorph_eval(const MRP& x, uint64_t k);
+
 /// Construct a zero-initialized MRP with the given base and ring dimension.
 MRP mr_zeros(const ModuliBase& target_base, uint64_t ring_dim);
 

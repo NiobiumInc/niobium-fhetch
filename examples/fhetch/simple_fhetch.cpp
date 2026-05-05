@@ -150,8 +150,13 @@ int main(int argc, char* argv[]) {
         auto w_eval = fhetch::mr_ntt(w_scaled);
         std::cout << "  mr_ntt(w_scaled) -> w_eval" << std::endl;
 
-        auto w_coeff = fhetch::mr_intt(w_eval);
-        std::cout << "  mr_intt(w_eval) -> w_coeff" << std::endl;
+        // Galois automorphism X -> X^5 in evaluation representation. k=5
+        // is the standard CKKS rotation generator for power-of-2 N.
+        auto w_aut = fhetch::mr_automorph_eval(w_eval, 5);
+        std::cout << "  mr_automorph_eval(w_eval, 5) -> w_aut" << std::endl;
+
+        auto w_coeff = fhetch::mr_intt(w_aut);
+        std::cout << "  mr_intt(w_aut) -> w_coeff" << std::endl;
         fhetch::tag_output("w_coeff", w_coeff);
 
         // ---- MRP Array dot product ----
