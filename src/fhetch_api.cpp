@@ -846,6 +846,13 @@ MRP mr_addps(const MRP& x, const MRS& s) {
     return z;
 }
 
+MRP mr_subps(const MRP& x, const MRS& s) {
+    const auto& base = x.base();
+    MRP z(base, x[base[0]].ring_dimension());
+    for (auto q : base) z[q] = sr_subps(x[q], s[q], q);
+    return z;
+}
+
 MRP mr_ntt(const MRP& x) {
     const auto& base = x.base();
     MRP z(base, x[base[0]].ring_dimension());
