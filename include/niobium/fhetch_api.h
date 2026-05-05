@@ -622,6 +622,9 @@ MRP mr_mulps(const MRP& x, const MRS& s);
 /// MRP-scalar addition: z[q] = sr_addps(x[q], s[q], q).
 MRP mr_addps(const MRP& x, const MRS& s);
 
+/// MRP-scalar subtraction: z[q] = sr_subps(x[q], s[q], q).
+MRP mr_subps(const MRP& x, const MRS& s);
+
 /// MRP NTT: apply sr_ntt to each residue.
 MRP mr_ntt(const MRP& x);
 

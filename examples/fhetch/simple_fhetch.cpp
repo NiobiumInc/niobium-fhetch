@@ -33,6 +33,7 @@ namespace fhetch = niobium::fhetch;
 using fhetch::Polynomial;
 using fhetch::Scalar;
 using fhetch::MRP;
+using fhetch::MRS;
 using fhetch::MRPArray;
 using fhetch::ModuliBase;
 
@@ -130,8 +131,24 @@ int main(int argc, char* argv[]) {
         auto w = fhetch::mr_mulp(z, x);
         std::cout << "  mr_mulp(z, x) -> w" << std::endl;
 
-        auto w_eval = fhetch::mr_ntt(w);
-        std::cout << "  mr_ntt(w) -> w_eval" << std::endl;
+        // Per-residue scalar arithmetic. Build an MRS once and feed it
+        // through addps / subps / mulps so each gadget gets exercised
+        // on the same input shape.
+        MRS s_per_q = MRS::from_pairs({
+            {Scalar::from_int(7),  q1},
+            {Scalar::from_int(11), q2},
+        });
+        auto w_addps = fhetch::mr_addps(w, s_per_q);
+        std::cout << "  mr_addps(w, {7,11}) -> w_addps" << std::endl;
+
+        auto w_subps = fhetch::mr_subps(w_addps, s_per_q);
+        std::cout << "  mr_subps(w_addps, {7,11}) -> w_subps" << std::endl;
+
+        auto w_scaled = fhetch::mr_mulps(w_subps, s_per_q);
+        std::cout << "  mr_mulps(w_subps, {7,11}) -> w_scaled" << std::endl;
+
+        auto w_eval = fhetch::mr_ntt(w_scaled);
+        std::cout << "  mr_ntt(w_scaled) -> w_eval" << std::endl;
 
         auto w_coeff = fhetch::mr_intt(w_eval);
         std::cout << "  mr_intt(w_eval) -> w_coeff" << std::endl;
