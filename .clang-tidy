@@ -1,0 +1,75 @@
+# Disabled-check rationale:
+#
+# - cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+#   cppcoreguidelines-pro-bounds-constant-array-index:
+#   incompatible with internal helpers that operate on plain T[]
+#   buffers and length pairs. gsl::span / gsl::array_view are not in
+#   the dependency graph.
+#
+# - cppcoreguidelines-owning-memory:
+#   gsl::owner<> is not in the dependency graph; lifetime is enforced
+#   by the shape of the API and reviewed at call sites.
+#
+# - bugprone-exception-escape, cppcoreguidelines-noexcept-*,
+#   performance-noexcept-*: noexcept correctness across the codebase
+#   is not enforced; exceptions are not used to signal recoverable
+#   errors, and the relevant move/swap functions are reviewed by
+#   hand.
+
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  clang-analyzer-*,
+  misc-include-cleaner,
+  -modernize-use-trailing-return-type,
+  -cppcoreguidelines-avoid-do-while,
+  -readability-identifier-length,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -modernize-use-nodiscard,
+  -cppcoreguidelines-noexcept-destructor,
+  -cppcoreguidelines-noexcept-move-operations,
+  -cppcoreguidelines-noexcept-swap,
+  -performance-noexcept-destructor,
+  -performance-noexcept-move-constructor,
+  -performance-noexcept-swap,
+  -bugprone-exception-escape,
+  -bugprone-easily-swappable-parameters,
+  -readability-braces-around-statements,
+  -readability-function-cognitive-complexity,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-special-member-functions,
+  -cppcoreguidelines-avoid-c-arrays,
+  -modernize-avoid-c-arrays,
+  -modernize-use-auto,
+  -modernize-use-using,
+  -readability-implicit-bool-conversion
+# WarningsAsErrors is empty so local `clang-tidy -p dbuild <file>`
+# emits warnings only. Promote to errors via
+# `clang-tidy --warnings-as-errors='*'` when wiring up a CI gate.
+WarningsAsErrors: ""
+# clang-tidy uses LLVM's POSIX-ERE regex, which lacks lookaround
+# support. Match first-party headers by structural prefix; the
+# ExcludeHeaderFilterRegex below handles vendor exclusion.
+HeaderFilterRegex: ".*/(include/niobium|src|tests)/.*\\.(h|hpp)$"
+ExcludeHeaderFilterRegex: ".*niobium-fhetch/vendor/.*"
+CheckOptions:
+  # OpenFHE is vendor code with an umbrella `openfhe.h` and
+  # serializer headers (`*-ser.h`) that register cereal hooks via
+  # static init. include-cleaner cannot model either pattern: it
+  # flags umbrella as unused, and -ser headers as unused even when
+  # serialization is called. Skip OpenFHE-shaped paths so the
+  # cleaner stays focused on first-party include hygiene.
+  misc-include-cleaner.IgnoreHeaders: "openfhe\\.h;.*-ser\\.h;.*/openfhe/.*"

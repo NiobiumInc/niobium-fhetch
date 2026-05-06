@@ -1,0 +1,77 @@
+# clangd configuration. See https://clangd.llvm.org/config.
+#
+# The ClangTidy block below mirrors .clang-tidy 1:1. Editing one
+# without the other causes editor / CI drift, which is the most common
+# source of "passes locally, fails CI" surprise. Keep them in sync;
+# the disabled-check rationale lives in .clang-tidy's header comment.
+
+CompileFlags:
+  # Match the project's C++23 standard (CMakeLists.txt sets
+  # CMAKE_CXX_STANDARD 23). compile_commands.json already carries
+  # -std=c++23 for source files; this fallback covers headers indexed
+  # without a database entry, and overrides any earlier -std= so
+  # std::expected and other C++23 features resolve under clangd.
+  Add: [-std=c++23]
+  CompilationDatabase: dbuild
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  # clangd's built-in include-cleaner runs separately from the
+  # clang-tidy misc-include-cleaner check and has its own ignore
+  # list. Mirror the misc-include-cleaner.IgnoreHeaders patterns so
+  # OpenFHE umbrella + serializer headers don't fire warnings in
+  # the editor.
+  Includes:
+    IgnoreHeader:
+      - 'openfhe\.h'
+      - '.*-ser\.h'
+      - '.*/openfhe/.*'
+  ClangTidy:
+    Add:
+      - bugprone-*
+      - cppcoreguidelines-*
+      - modernize-*
+      - performance-*
+      - readability-*
+      - clang-analyzer-*
+      - misc-include-cleaner
+    Remove:
+      - modernize-use-trailing-return-type
+      - cppcoreguidelines-avoid-do-while
+      - readability-identifier-length
+      - cppcoreguidelines-pro-bounds-pointer-arithmetic
+      - cppcoreguidelines-pro-bounds-array-to-pointer-decay
+      - cppcoreguidelines-pro-bounds-constant-array-index
+      - cppcoreguidelines-pro-type-reinterpret-cast
+      - cppcoreguidelines-pro-type-vararg
+      - cppcoreguidelines-owning-memory
+      - cppcoreguidelines-avoid-magic-numbers
+      - readability-magic-numbers
+      - modernize-use-nodiscard
+      - cppcoreguidelines-noexcept-destructor
+      - cppcoreguidelines-noexcept-move-operations
+      - cppcoreguidelines-noexcept-swap
+      - performance-noexcept-destructor
+      - performance-noexcept-move-constructor
+      - performance-noexcept-swap
+      - bugprone-exception-escape
+      - bugprone-easily-swappable-parameters
+      - readability-braces-around-statements
+      - readability-function-cognitive-complexity
+      - cppcoreguidelines-avoid-non-const-global-variables
+      - cppcoreguidelines-pro-type-cstyle-cast
+      - cppcoreguidelines-macro-usage
+      - cppcoreguidelines-special-member-functions
+      - cppcoreguidelines-avoid-c-arrays
+      - modernize-avoid-c-arrays
+      - modernize-use-auto
+      - modernize-use-using
+      - readability-implicit-bool-conversion
+    CheckOptions:
+      misc-include-cleaner.IgnoreHeaders: "openfhe\\.h;.*-ser\\.h;.*/openfhe/.*"
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
