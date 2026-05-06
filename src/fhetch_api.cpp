@@ -524,14 +524,14 @@ void save_input_data() {
     // TODO: Serialize input polynomial data to JSON for server consumption
     auto& registry = input_registry();
     if (registry.empty()) return;
-    std::cout << "[FHETCH] " << registry.size() << " inputs registered" << std::endl;
+    std::cout << "[FHETCH] " << registry.size() << " inputs registered" << '\n';
 }
 
 void save_probe_outputs() {
     // TODO: Serialize output probe metadata to JSON for server consumption
     auto& registry = probe_registry();
     if (registry.empty()) return;
-    std::cout << "[FHETCH] " << registry.size() << " outputs registered" << std::endl;
+    std::cout << "[FHETCH] " << registry.size() << " outputs registered" << '\n';
 }
 
 // ============================================================================
