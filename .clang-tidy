@@ -72,4 +72,8 @@ CheckOptions:
   # flags umbrella as unused, and -ser headers as unused even when
   # serialization is called. Skip OpenFHE-shaped paths so the
   # cleaner stays focused on first-party include hygiene.
-  misc-include-cleaner.IgnoreHeaders: "openfhe\\.h;.*-ser\\.h;.*/openfhe/.*"
+  # Darwin libc++ exposes POSIX symbols (pid_t, size_t, etc.) via
+  # internal sys/_types/ headers re-exported by sys/types.h, cstddef,
+  # etc. Prefer the public POSIX header so sources stay portable to
+  # Linux where the internal paths don't exist.
+  misc-include-cleaner.IgnoreHeaders: "openfhe\\.h;.*-ser\\.h;.*/openfhe/.*;sys/_types/.*\\.h;_types\\.h"
