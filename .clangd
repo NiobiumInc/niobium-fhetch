@@ -61,6 +61,7 @@ Diagnostics:
       - performance-noexcept-destructor
       - performance-noexcept-move-constructor
       - performance-noexcept-swap
+      - performance-avoid-endl
       - bugprone-exception-escape
       - bugprone-easily-swappable-parameters
       - readability-braces-around-statements
