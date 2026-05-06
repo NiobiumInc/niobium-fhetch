@@ -484,8 +484,7 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
     std::vector<uint64_t> addr_ids;
     const auto& towers = dcrt->GetAllElements();
     size_t zero_count = 0;
-    for (size_t ti = 0; ti < towers.size(); ++ti) {
-        const auto& poly = towers[ti];
+    for (const auto & poly : towers) {
         uintptr_t poly_id = poly.GetId();
         detail::pin_openfhe_id(poly_id);
         uint64_t fhetch_addr = detail::ensure_fhetch_address(poly_id);
@@ -721,7 +720,7 @@ void Compiler::tag_bootstrap_precompute<lbcrypto::CryptoContext<DCRTPoly>>(
     for (const auto& [slots, precom] : bootMap) {
         if (!precom) continue;
         ar(precom->m_slots);
-        ar(static_cast<uint32_t>(precom->m_paramsEnc.g));  // m_dim1
+        ar(precom->m_paramsEnc.g);  // m_dim1
 
         auto write_params = [&](const auto& p) {
             ar(p.lvlb, p.layersCollapse, p.remCollapse, p.numRotations,
@@ -837,7 +836,7 @@ void niobium::Compiler::refresh_all_inputs() {
 // reconstruct_probes() — fill ciphertext templates with simulator output
 // ============================================================================
 
-void Compiler::reconstruct_probes() {
+void Compiler::reconstruct_probes() const {
     // Re-entry guard. The Serial::{De,}SerializeFromFile calls below fire
     // the auto-facade's on_{de,}serialize_ciphertext hooks, which in turn
     // call probe() / ensure_replayed() → back into this code. Use the
