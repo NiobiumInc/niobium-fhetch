@@ -303,7 +303,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
     case OpCode::SR_SUBP:
     case OpCode::SR_MULP: {
         if (args.size() < 4) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1, s2; uint32_t m;
+        uint64_t d = 0, s1 = 0, s2 = 0; uint32_t m = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)
             || !parse_addr(args[2], s2) || !parse_modulus_ref(args[3], m)) {
             drv.stats.skipped_lines++; return false;
@@ -325,7 +325,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
     case OpCode::SR_ADDPS_COEFF:
     case OpCode::SR_SUBPS_COEFF: {
         if (args.size() < 4) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1, imm; uint32_t m;
+        uint64_t d = 0, s1 = 0, imm = 0; uint32_t m = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)
             || !parse_uint(args[2], imm) || !parse_modulus_ref(args[3], m)) {
             drv.stats.skipped_lines++; return false;
@@ -349,7 +349,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
 
     case OpCode::SR_NEGP: {
         if (args.size() < 3) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1; uint32_t m;
+        uint64_t d = 0, s1 = 0; uint32_t m = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)
             || !parse_modulus_ref(args[2], m)) {
             drv.stats.skipped_lines++; return false;
@@ -363,7 +363,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
     case OpCode::SR_NTT:
     case OpCode::SR_INTT: {
         if (args.size() < 3) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1; uint32_t m;
+        uint64_t d = 0, s1 = 0; uint32_t m = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)
             || !parse_modulus_ref(args[2], m)) {
             drv.stats.skipped_lines++; return false;
@@ -377,7 +377,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
 
     case OpCode::SR_PERMUTE: {
         if (args.size() < 3) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1; uint32_t m;
+        uint64_t d = 0, s1 = 0; uint32_t m = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)
             || !parse_modulus_ref(args[2], m)) {
             drv.stats.skipped_lines++; return false;
@@ -392,13 +392,13 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
 
     case OpCode::SR_AUTOMORPH_EVAL: {
         if (args.size() < 2) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1;
+        uint64_t d = 0, s1 = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)) {
             drv.stats.skipped_lines++; return false;
         }
         uint64_t k = 1;
         for (size_t i = 2; i < args.size(); ++i) {
-            uint64_t v;
+            uint64_t v = 0;
             if (parse_named_uint(args[i], "k=", v)) { k = v; break; }
         }
         const Polynomial& a = drv.get_or_create_src(s1);
@@ -409,14 +409,14 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
 
     case OpCode::SR_AUTOMORPH_COEFF: {
         if (args.size() < 4) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1;
+        uint64_t d = 0, s1 = 0;
         uint64_t k = 0;
         uint32_t m = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)) {
             drv.stats.skipped_lines++; return false;
         }
         for (size_t i = 2; i < args.size(); ++i) {
-            uint64_t v;
+            uint64_t v = 0;
             if (parse_named_uint(args[i], "k=", v)) k = v;
             else parse_modulus_ref(args[i], m);
         }
@@ -428,14 +428,14 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
 
     case OpCode::SR_ROT_AUTOMORPH_COEFF: {
         if (args.size() < 4) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1;
+        uint64_t d = 0, s1 = 0;
         uint64_t off = 0;
         uint32_t m = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)) {
             drv.stats.skipped_lines++; return false;
         }
         for (size_t i = 2; i < args.size(); ++i) {
-            uint64_t v;
+            uint64_t v = 0;
             if (parse_named_uint(args[i], "offset=", v)) off = v;
             else parse_modulus_ref(args[i], m);
         }
@@ -450,7 +450,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
     case OpCode::SR_SUBP_NI:
     case OpCode::SR_MULP_NI: {
         if (args.size() < 3) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1, s2;
+        uint64_t d = 0, s1 = 0, s2 = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)
             || !parse_addr(args[2], s2)) {
             drv.stats.skipped_lines++; return false;
@@ -471,7 +471,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
     case OpCode::SR_ADDPS_COEFF_NI:
     case OpCode::SR_SUBPS_COEFF_NI: {
         if (args.size() < 3) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1, imm;
+        uint64_t d = 0, s1 = 0, imm = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)
             || !parse_uint(args[2], imm)) {
             drv.stats.skipped_lines++; return false;
@@ -496,7 +496,7 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
     case OpCode::SR_FT:
     case OpCode::SR_IFT: {
         if (args.size() < 2) { drv.stats.skipped_lines++; return false; }
-        uint64_t d, s1;
+        uint64_t d = 0, s1 = 0;
         if (!parse_addr(args[0], d) || !parse_addr(args[1], s1)) {
             drv.stats.skipped_lines++; return false;
         }
