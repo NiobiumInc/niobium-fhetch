@@ -80,7 +80,8 @@ struct Simulator::Impl {
 
     bool exec_addp(const Instruction& inst) {
         uint64_t q = resolve_modulus(inst.modulus_index);
-        std::vector<uint64_t> scratch1, scratch2;
+        std::vector<uint64_t> scratch1;
+        std::vector<uint64_t> scratch2;
         const auto& a = get_or_zero(inst.src1, scratch1, inst);
         const auto& b = get_or_zero(inst.src2, scratch2, inst);
         if (a.size() != ring_dim || b.size() != ring_dim) {
@@ -88,7 +89,8 @@ struct Simulator::Impl {
         }
 
         NativeInteger mod(q);
-        NativeVector va(ring_dim, mod), vb(ring_dim, mod);
+        NativeVector va(ring_dim, mod);
+        NativeVector vb(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) {
             va[i] = NativeInteger(a[i]);
             vb[i] = NativeInteger(b[i]);
@@ -103,7 +105,8 @@ struct Simulator::Impl {
 
     bool exec_subp(const Instruction& inst) {
         uint64_t q = resolve_modulus(inst.modulus_index);
-        std::vector<uint64_t> scratch1, scratch2;
+        std::vector<uint64_t> scratch1;
+        std::vector<uint64_t> scratch2;
         const auto& a = get_or_zero(inst.src1, scratch1, inst);
         const auto& b = get_or_zero(inst.src2, scratch2, inst);
         if (a.size() != ring_dim || b.size() != ring_dim) {
@@ -111,7 +114,8 @@ struct Simulator::Impl {
         }
 
         NativeInteger mod(q);
-        NativeVector va(ring_dim, mod), vb(ring_dim, mod);
+        NativeVector va(ring_dim, mod);
+        NativeVector vb(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) {
             va[i] = NativeInteger(a[i]);
             vb[i] = NativeInteger(b[i]);
@@ -126,7 +130,8 @@ struct Simulator::Impl {
 
     bool exec_mulp(const Instruction& inst) {
         uint64_t q = resolve_modulus(inst.modulus_index);
-        std::vector<uint64_t> scratch1, scratch2;
+        std::vector<uint64_t> scratch1;
+        std::vector<uint64_t> scratch2;
         const auto& a = get_or_zero(inst.src1, scratch1, inst);
         const auto& b = get_or_zero(inst.src2, scratch2, inst);
         if (a.size() != ring_dim || b.size() != ring_dim) {
@@ -134,7 +139,8 @@ struct Simulator::Impl {
         }
 
         NativeInteger mod(q);
-        NativeVector va(ring_dim, mod), vb(ring_dim, mod);
+        NativeVector va(ring_dim, mod);
+        NativeVector vb(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) {
             va[i] = NativeInteger(a[i]);
             vb[i] = NativeInteger(b[i]);
@@ -160,7 +166,8 @@ struct Simulator::Impl {
             return true;
         }
 
-        NativeInteger mod(q), imm(inst.immediate);
+        NativeInteger mod(q);
+        NativeInteger imm(inst.immediate);
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModAddEq(imm);
@@ -176,7 +183,8 @@ struct Simulator::Impl {
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
 
-        NativeInteger mod(q), imm(inst.immediate);
+        NativeInteger mod(q);
+        NativeInteger imm(inst.immediate);
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModSubEq(imm);
@@ -199,7 +207,8 @@ struct Simulator::Impl {
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
 
-        NativeInteger mod(q), imm(inst.immediate);
+        NativeInteger mod(q);
+        NativeInteger imm(inst.immediate);
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModMulEq(imm);
