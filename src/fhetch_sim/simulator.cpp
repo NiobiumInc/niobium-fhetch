@@ -275,12 +275,12 @@ struct Simulator::Impl {
         // logn such that (1 << logn) == ring_dim
         uint32_t logn = 0;
         for (uint32_t n = static_cast<uint32_t>(ring_dim); n > 1; n >>= 1) ++logn;
-        uint32_t mask = (1u << logn) - 1u;
+        uint32_t mask = (1U << logn) - 1U;
 
         auto rev_bits = [](uint32_t x, uint32_t bits) {
             uint32_t r = 0;
             for (uint32_t i = 0; i < bits; ++i)
-                if (x & (1u << i)) r |= 1u << (bits - 1 - i);
+                if (x & (1U << i)) r |= 1U << (bits - 1 - i);
             return r;
         };
 
@@ -434,7 +434,7 @@ struct Simulator::Impl {
                     std::cout << "[FHETCH_SIM-DBG] #" << i
                               << " " << inst.raw_line
                               << "  →  %" << inst.dest
-                              << " v[0..3]=" << (v.size()>0?v[0]:0)
+                              << " v[0..3]=" << (!v.empty()?v[0]:0)
                               << "," << (v.size()>1?v[1]:0)
                               << "," << (v.size()>2?v[2]:0)
                               << "," << (v.size()>3?v[3]:0)

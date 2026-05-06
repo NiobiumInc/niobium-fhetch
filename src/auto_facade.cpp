@@ -184,7 +184,7 @@ void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
     for (const auto& p : elemParams->GetParams())
         modulus_chain.push_back(p->GetModulus().ConvertToInt());
 
-    uint32_t depth = static_cast<uint32_t>(modulus_chain.size() > 0 ? modulus_chain.size() - 1 : 0);
+    uint32_t depth = static_cast<uint32_t>(!modulus_chain.empty() ? modulus_chain.size() - 1 : 0);
 
     set_crypto_context_info(scheme, depth, 0, "HEStd_NotSet", modulus_chain);
 
@@ -329,7 +329,7 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
     const lbcrypto::Ciphertext<DCRTPoly>& ct,
     std::optional<std::filesystem::path> file) {
     auto& mutable_ct = const_cast<lbcrypto::Ciphertext<DCRTPoly>&>(ct);
-    tag_input(input_name, mutable_ct, file);
+    tag_input(input_name, mutable_ct, std::move(file));
 }
 
 namespace { thread_local bool g_in_probe = false; }

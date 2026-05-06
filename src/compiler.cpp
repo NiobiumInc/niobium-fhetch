@@ -675,7 +675,7 @@ bool Compiler::replay() {
                 for (uint64_t x : v) if (x != 0) { all_zero = false; break; }
                 std::cout << "[NIOBIUM-DBG]   %" << a
                           << " q=0x" << std::hex << q << std::dec
-                          << " v[0..3]=" << (v.size()>0?v[0]:0)
+                          << " v[0..3]=" << (!v.empty()?v[0]:0)
                           << "," << (v.size()>1?v[1]:0)
                           << "," << (v.size()>2?v[2]:0)
                           << "," << (v.size()>3?v[3]:0)
