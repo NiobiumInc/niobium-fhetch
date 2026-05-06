@@ -16,7 +16,7 @@
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " <trace.fhetch> [--ring-dim N]"
-                  << std::endl;
+                  << '\n';
         return 1;
     }
 
@@ -29,17 +29,17 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "=== FHETCH Simulator ===" << std::endl;
+    std::cout << "=== FHETCH Simulator ===" << '\n';
 
     niobium::fhetch_sim::Simulator sim;
 
     if (!sim.load_trace(trace_file)) {
-        std::cerr << "Failed to load trace" << std::endl;
+        std::cerr << "Failed to load trace" << '\n';
         return 1;
     }
 
     if (ring_dim == 0) {
-        std::cerr << "Ring dimension required: --ring-dim N" << std::endl;
+        std::cerr << "Ring dimension required: --ring-dim N" << '\n';
         return 1;
     }
     sim.set_ring_dimension(ring_dim);
@@ -47,11 +47,11 @@ int main(int argc, char* argv[]) {
     auto result = sim.run();
 
     if (result.errors > 0) {
-        std::cerr << "[FAIL] " << result.errors << " errors" << std::endl;
+        std::cerr << "[FAIL] " << result.errors << " errors" << '\n';
         return 1;
     }
 
     std::cout << "[PASS] " << result.instructions_executed << " instructions, "
-              << result.elapsed_seconds << "s" << std::endl;
+              << result.elapsed_seconds << "s" << '\n';
     return 0;
 }

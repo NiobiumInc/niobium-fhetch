@@ -128,7 +128,7 @@ ParsedTrace parse_trace(const std::string& trace_text) {
             size_t space = trimmed.find(' ');
             if (space == std::string::npos) {
                 std::cerr << "[FHETCH_SIM] Line " << line_num
-                          << ": malformed modulus entry: " << trimmed << std::endl;
+                          << ": malformed modulus entry: " << trimmed << '\n';
                 continue;
             }
             std::string hex_str = trim(trimmed.substr(space + 1));
