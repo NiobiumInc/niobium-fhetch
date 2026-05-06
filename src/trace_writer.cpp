@@ -41,29 +41,29 @@ void TraceWriter::set_source_info(const std::string& file, int line,
 }
 
 void TraceWriter::start_recording() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     recording_ = true;
     paused_ = false;
 }
 
 void TraceWriter::stop_recording() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     recording_ = false;
     paused_ = false;
 }
 
 void TraceWriter::pause_recording() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     paused_ = true;
 }
 
 void TraceWriter::resume_recording() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     paused_ = false;
 }
 
 uint32_t TraceWriter::register_modulus(uint64_t modulus) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     auto it = modulus_index_.find(modulus);
     if (it != modulus_index_.end())
         return it->second;
@@ -74,19 +74,19 @@ uint32_t TraceWriter::register_modulus(uint64_t modulus) {
 }
 
 void TraceWriter::emit(const std::string& instruction) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (recording_ && !paused_) {
         instructions_.push_back(instruction);
     }
 }
 
 void TraceWriter::emit_preamble(const std::string& instruction) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     instructions_.push_back(instruction);
 }
 
 void TraceWriter::comment(const std::string& text) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (recording_ && !paused_) {
         instructions_.push_back("# " + text);
     }
@@ -193,7 +193,7 @@ std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
 }
 
 void TraceWriter::clear() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     instructions_.clear();
     modulus_table_.clear();
     modulus_index_.clear();

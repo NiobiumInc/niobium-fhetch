@@ -179,18 +179,18 @@ void openfhe_cprobe_annotate(const char* annotation) {
 // prevents setup-time intermediates (thousands of them allocated during
 // EvalBootstrapSetup) from eating up the low-address range.
 void openfhe_cprobe_id(uintptr_t poly_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     g_refcount.emplace(poly_id, 1);
 }
 
 uintptr_t* openfhe_cprobe_address(uintptr_t poly_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (niobium::compiler().running_p()) map_address(poly_id);
     return nullptr;
 }
 
 uintptr_t* openfhe_cprobe_result(uintptr_t poly_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (niobium::compiler().running_p()) map_address(poly_id);
     return nullptr;
 }
@@ -208,25 +208,25 @@ uintptr_t* openfhe_cprobe_cache() {
 // trace or tagged. Matches the compiler's Generator::discrete_gaussian
 // etc. which bail with !running_p() except for pinning bookkeeping.
 void openfhe_cprobe_discrete_gaussian(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
 
 void openfhe_cprobe_discrete_uniform(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
 
 void openfhe_cprobe_binary_uniform(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
 
 void openfhe_cprobe_ternary_uniform(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
@@ -237,7 +237,7 @@ static size_t g_precompute_probe_count = 0;
 static size_t g_precompute_probe_already_mapped = 0;
 
 void openfhe_cprobe_precompute(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     ++g_precompute_probe_count;
     if (g_address_map.find(poly_id) != g_address_map.end())
         ++g_precompute_probe_already_mapped;
@@ -247,7 +247,7 @@ void openfhe_cprobe_precompute(uintptr_t poly_id, int /*format*/) {
 }
 
 void openfhe_cprobe_zero(uintptr_t poly_id, int /*format*/, uint64_t modulus) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     // Skip outside recording (matches compiler's Generator::zero which
     // bails on !running_p()). During EvalBootstrapSetup this probe fires
     // thousands of times for intermediate DCRTPoly towers — allocating
@@ -263,7 +263,7 @@ void openfhe_cprobe_zero(uintptr_t poly_id, int /*format*/, uint64_t modulus) {
 }
 
 void openfhe_cprobe_max(uintptr_t poly_id, int /*format*/, uint64_t /*modulus*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
 
@@ -272,17 +272,17 @@ void openfhe_cprobe_max(uintptr_t poly_id, int /*format*/, uint64_t /*modulus*/)
 // ============================================================================
 
 void openfhe_cprobe_input(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
 
 void openfhe_cprobe_output(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
 
 void openfhe_cprobe_key(uintptr_t poly_id, int /*format*/) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (niobium::compiler().running_p()) map_address(poly_id);
 }
 
@@ -291,7 +291,7 @@ void openfhe_cprobe_key(uintptr_t poly_id, int /*format*/) {
 // ============================================================================
 
 void openfhe_cprobe_copy(uintptr_t dst_id, uintptr_t src_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (g_serialization_thread) return;
     // Matches the compiler's Generator::copy(): bail entirely if not
     // recording. Setup-time copies shouldn't reach the trace or
@@ -307,7 +307,7 @@ void openfhe_cprobe_copy(uintptr_t dst_id, uintptr_t src_id) {
 }
 
 void openfhe_cprobe_move(uintptr_t dst_id, uintptr_t src_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (g_serialization_thread) return;
     // Matches the compiler's Generator::move(): bail if not recording.
     // Setup-time moves (very common from std::move() of intermediate
@@ -325,7 +325,7 @@ void openfhe_cprobe_move(uintptr_t dst_id, uintptr_t src_id) {
 // This is how bootstrap precompute plaintexts, built by reassigning earlier
 // intermediates, end up at the same compact addresses the trace reads from.
 void openfhe_cprobe_reassign_id(uintptr_t dst_old, uintptr_t src) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
 
     // src gains a reference.
     ++g_refcount[src];
@@ -377,7 +377,7 @@ bool openfhe_cprobe_is_serialization_thread() {
 void openfhe_cprobe_add(uintptr_t dst, uintptr_t src1, uintptr_t src2,
                         uint64_t modulus) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t s1 = resolve_inplace_src(map_address(src1), da);
     uintptr_t s2 = map_address(src2);
@@ -389,7 +389,7 @@ void openfhe_cprobe_add(uintptr_t dst, uintptr_t src1, uintptr_t src2,
 void openfhe_cprobe_sub(uintptr_t dst, uintptr_t src1, uintptr_t src2,
                         uint64_t modulus) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t s1 = resolve_inplace_src(map_address(src1), da);
     uintptr_t s2 = map_address(src2);
@@ -401,7 +401,7 @@ void openfhe_cprobe_sub(uintptr_t dst, uintptr_t src1, uintptr_t src2,
 void openfhe_cprobe_mul(uintptr_t dst, uintptr_t src1, uintptr_t src2,
                         uint64_t modulus) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t s1 = resolve_inplace_src(map_address(src1), da);
     uintptr_t s2 = map_address(src2);
@@ -413,7 +413,7 @@ void openfhe_cprobe_mul(uintptr_t dst, uintptr_t src1, uintptr_t src2,
 void openfhe_cprobe_addi(uintptr_t dst, uintptr_t src, uint64_t immediate,
                          uint64_t modulus) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_addps " + addr(da) + ", " + addr(sa) + ", " + std::to_string(immediate) +
@@ -424,7 +424,7 @@ void openfhe_cprobe_addi(uintptr_t dst, uintptr_t src, uint64_t immediate,
 void openfhe_cprobe_subi(uintptr_t dst, uintptr_t src, uint64_t immediate,
                          uint64_t modulus) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_subps " + addr(da) + ", " + addr(sa) + ", " + std::to_string(immediate) +
@@ -435,7 +435,7 @@ void openfhe_cprobe_subi(uintptr_t dst, uintptr_t src, uint64_t immediate,
 void openfhe_cprobe_muli(uintptr_t dst, uintptr_t src, uint64_t immediate,
                          uint64_t modulus) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_mulps " + addr(da) + ", " + addr(sa) + ", " + std::to_string(immediate) +
@@ -450,7 +450,7 @@ void openfhe_cprobe_muli(uintptr_t dst, uintptr_t src, uint64_t immediate,
 void openfhe_cprobe_ntt(uintptr_t dst, uintptr_t src, uint64_t modulus,
                         uint64_t omega) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_ntt " + addr(da) + ", " + addr(sa) + ", " + midx(modulus) +
@@ -461,7 +461,7 @@ void openfhe_cprobe_ntt(uintptr_t dst, uintptr_t src, uint64_t modulus,
 void openfhe_cprobe_intt(uintptr_t dst, uintptr_t src, uint64_t modulus,
                          uint64_t omega) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_intt " + addr(da) + ", " + addr(sa) + ", " + midx(modulus) +
@@ -477,7 +477,7 @@ void openfhe_cprobe_automorphism(uintptr_t dst, uintptr_t src,
                                  uint64_t modulus, uint64_t mask,
                                  uint64_t logn, uint64_t k) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
     emit("sr_automorph_eval " + addr(da) + ", " + addr(sa) +
@@ -494,7 +494,7 @@ void openfhe_cprobe_switchmodulus(uintptr_t dst, uintptr_t src,
                                  uint64_t /*root_of_unity_new*/,
                                  uint64_t /*ring_dim*/) {
     if (!should_record()) return;
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
 
     // SwitchModulus expands to muli-addi-muli-addi (same as compiler's
     // SwitchModulus::expand() with non-HW immediates).
@@ -558,14 +558,14 @@ void openfhe_cprobe_save_dcrt_poly(const void* dcrt_poly_ptr) {
 namespace niobium::detail {
 
 uint64_t lookup_fhetch_address(uintptr_t openfhe_poly_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     auto it = g_address_map.find(openfhe_poly_id);
     if (it != g_address_map.end()) return it->second;
     return static_cast<uint64_t>(-1);
 }
 
 uint64_t ensure_fhetch_address(uintptr_t openfhe_poly_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     return map_address(openfhe_poly_id);
 }
 
@@ -574,21 +574,21 @@ const std::unordered_map<uint64_t, uint64_t>& get_data_parent_map() {
 }
 
 void pin_openfhe_id(uintptr_t poly_id) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
 }
 
 uintptr_t niobium_precompute_probe_count() {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     return g_precompute_probe_count;
 }
 uintptr_t niobium_precompute_probe_already_mapped_count() {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     return g_precompute_probe_already_mapped;
 }
 
 void reserve_fhetch_addresses(uint64_t next_addr) {
-    std::lock_guard<std::mutex> lock(g_probe_mutex);
+    std::scoped_lock lock(g_probe_mutex);
     if (next_addr > g_next_fhetch_addr)
         g_next_fhetch_addr = next_addr;
 }
