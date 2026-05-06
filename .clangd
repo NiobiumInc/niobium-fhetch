@@ -26,6 +26,13 @@ Diagnostics:
       - 'openfhe\.h'
       - '.*-ser\.h'
       - '.*/openfhe/.*'
+      # Darwin libc++ exposes POSIX symbols (pid_t, size_t, etc.)
+      # via internal headers under sys/_types/ which are re-exported
+      # by sys/types.h, cstddef, etc. Prefer the public POSIX header
+      # so the same source compiles on Linux (where the internal
+      # path doesn't exist).
+      - 'sys/_types/.*\.h'
+      - '_types\.h'
   ClangTidy:
     Add:
       - bugprone-*

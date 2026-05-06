@@ -15,7 +15,7 @@
 
 #include <spawn.h>
 #include <string>
-#include <sys/_types/_pid_t.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <vector>
 #include <utility>
