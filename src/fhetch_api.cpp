@@ -308,7 +308,7 @@ MRP::MRP(const ModuliBase& base, uint64_t ring_dim)
 
 MRP MRP::from_pairs(const std::vector<std::pair<Polynomial, uint64_t>>& pairs) {
     auto impl = std::make_shared<MRPImpl>();
-    for (auto& [poly, q] : pairs) {
+    for (const auto& [poly, q] : pairs) {
         impl->base_.push_back(q);
         impl->residues_[q] = poly;
     }
@@ -359,7 +359,7 @@ MRS::MRS(const ModuliBase& base) : impl_(std::make_shared<MRSImpl>(base)) {}
 
 MRS MRS::from_pairs(const std::vector<std::pair<Scalar, uint64_t>>& pairs) {
     auto impl = std::make_shared<MRSImpl>();
-    for (auto& [s, q] : pairs) {
+    for (const auto& [s, q] : pairs) {
         impl->base_.push_back(q);
         impl->scalars_[q] = s;
     }
@@ -1236,9 +1236,9 @@ SRPArray gsw_rlwe_ext_prod(const SRPArray& gsw,
 
     for (size_t level = 0; level < l; ++level) {
         r0 = sr_addp_ni(r0, sr_mulp_ni(decomp0_ft[level], gsw[4 * level]));
-        r0 = sr_addp_ni(r0, sr_mulp_ni(decomp1_ft[level], gsw[4 * level + 1]));
-        r1 = sr_addp_ni(r1, sr_mulp_ni(decomp0_ft[level], gsw[4 * level + 2]));
-        r1 = sr_addp_ni(r1, sr_mulp_ni(decomp1_ft[level], gsw[4 * level + 3]));
+        r0 = sr_addp_ni(r0, sr_mulp_ni(decomp1_ft[level], gsw[(4 * level) + 1]));
+        r1 = sr_addp_ni(r1, sr_mulp_ni(decomp0_ft[level], gsw[(4 * level) + 2]));
+        r1 = sr_addp_ni(r1, sr_mulp_ni(decomp1_ft[level], gsw[(4 * level) + 3]));
     }
 
     r0 = sr_ift(r0);

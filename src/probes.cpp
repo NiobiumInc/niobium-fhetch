@@ -11,6 +11,7 @@
 #include "niobium/compiler.h"
 #include "compiler_internal.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstddef>
@@ -589,8 +590,7 @@ uintptr_t niobium_precompute_probe_already_mapped_count() {
 
 void reserve_fhetch_addresses(uint64_t next_addr) {
     std::scoped_lock lock(g_probe_mutex);
-    if (next_addr > g_next_fhetch_addr)
-        g_next_fhetch_addr = next_addr;
+    g_next_fhetch_addr = std::max<uint64_t>(next_addr, g_next_fhetch_addr);
 }
 
 }  // namespace niobium::detail
