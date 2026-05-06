@@ -669,7 +669,8 @@ void Compiler::tag_bootstrap_precompute<lbcrypto::CryptoContext<DCRTPoly>>(
 
     auto range = [&](size_t from) {
         if (addr_ids.size() <= from) return std::string("empty");
-        uint64_t mn = addr_ids[from], mx = addr_ids[from];
+        uint64_t mn = addr_ids[from];
+        uint64_t mx = addr_ids[from];
         for (size_t i = from + 1; i < addr_ids.size(); ++i) {
             mn = std::min(mn, addr_ids[i]);
             mx = std::max(mx, addr_ids[i]);

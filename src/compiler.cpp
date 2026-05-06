@@ -587,7 +587,8 @@ bool Compiler::replay() {
     // cannot reach the clone.
     size_t direct_count = 0;
     for (const auto& input : impl_->captured_inputs) {
-        size_t live = 0, aux = 0;
+        size_t live = 0;
+        size_t aux = 0;
         for (const auto& elem : input.elements) {
             impl_->simulator->store_polynomial(elem.addr_id, elem.values, elem.modulus);
             direct_count++;
