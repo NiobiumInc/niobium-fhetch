@@ -165,7 +165,7 @@ public:
     /// next call to tag_keys/tag_input places polynomials starting there.
     /// Used to match the compiler's fixed key-start offsets (e.g. 25 for
     /// evalmult, 49 for evalautomorphism).
-    void reserve_addresses(uint64_t next_addr);
+    static void reserve_addresses(uint64_t next_addr);
 
     /// Capture evaluation key polynomial data for the simulator.
     /// Iterates over all EvalMult and EvalAutomorphism keys loaded in the
@@ -232,7 +232,7 @@ public:
                 CiphertextType& result);
 
     /// Reconstruct probe ciphertexts from simulator output.
-    void reconstruct_probes();
+    void reconstruct_probes() const;
 
     /// Re-extract polynomial data from all stored OpenFHE objects.
     /// Called at replay() time to capture polynomials at their current
