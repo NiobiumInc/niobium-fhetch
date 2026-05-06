@@ -6,12 +6,11 @@
 # the disabled-check rationale lives in .clang-tidy's header comment.
 
 CompileFlags:
-  # Match the project's C++23 standard (CMakeLists.txt sets
-  # CMAKE_CXX_STANDARD 23). compile_commands.json already carries
-  # -std=c++23 for source files; this fallback covers headers indexed
-  # without a database entry, and overrides any earlier -std= so
-  # std::expected and other C++23 features resolve under clangd.
-  Add: [-std=c++23]
+  # compile_commands.json carries -std=c++17 (CMakeLists.txt sets
+  # CMAKE_CXX_STANDARD 17). No -std= override here so clangd's view
+  # matches the build; otherwise the editor would surface warnings
+  # for C++20+ features (like set::contains) that the codebase
+  # cannot actually use.
   CompilationDatabase: dbuild
 
 Diagnostics:
