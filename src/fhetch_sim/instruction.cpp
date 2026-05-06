@@ -243,7 +243,7 @@ ParsedTrace parse_trace(const std::string& trace_text) {
                 parse_addr(args[1], inst.src1);
                 parse_modulus_ref(args[2], inst.modulus_index);
                 if (args.size() >= 4) {
-                    uint64_t w;
+                    uint64_t w = 0;
                     if (parse_named_uint(args[3], "omega=", w))
                         inst.omega = w;
                 }
@@ -267,7 +267,7 @@ ParsedTrace parse_trace(const std::string& trace_text) {
                 parse_addr(args[0], inst.dest);
                 parse_addr(args[1], inst.src1);
                 for (size_t i = 2; i < args.size(); ++i) {
-                    uint64_t v;
+                    uint64_t v = 0;
                     if (parse_named_uint(args[i], "k=", v)) inst.k = v;
                     else parse_modulus_ref(args[i], inst.modulus_index);
                 }
@@ -278,7 +278,7 @@ ParsedTrace parse_trace(const std::string& trace_text) {
             if (args.size() >= 4) {
                 parse_addr(args[0], inst.dest);
                 parse_addr(args[1], inst.src1);
-                uint64_t kval;
+                uint64_t kval = 0;
                 if (parse_named_uint(args[2], "k=", kval)) inst.k = kval;
                 parse_modulus_ref(args[3], inst.modulus_index);
             }
@@ -288,7 +288,7 @@ ParsedTrace parse_trace(const std::string& trace_text) {
             if (args.size() >= 4) {
                 parse_addr(args[0], inst.dest);
                 parse_addr(args[1], inst.src1);
-                uint64_t off;
+                uint64_t off = 0;
                 if (parse_named_uint(args[2], "offset=", off)) inst.offset = off;
                 parse_modulus_ref(args[3], inst.modulus_index);
             }

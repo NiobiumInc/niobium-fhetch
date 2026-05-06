@@ -72,7 +72,7 @@ static uintptr_t map_address(uintptr_t openfhe_id) {
         dbg_track("map_address (existing)", openfhe_id, it->second);
         return it->second;
     }
-    uintptr_t addr;
+    uintptr_t addr = 0;
     bool from_pool = false;
     // Pinned addresses (inputs, keys, precompute) always take a fresh id so
     // they stay stable and don't accidentally inherit a recycled address.
