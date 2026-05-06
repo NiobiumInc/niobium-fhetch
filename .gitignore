@@ -49,8 +49,12 @@ dbuild/
 simple_fhetch_example_simple/
 epoch_fhetch_example_epoch/
 
-# OpenFHE install prefix (set by Makefile)
+# OpenFHE install prefix (set by Makefile). The -<platform> sibling is
+# created by host-VM bind-mount setups that overlay a per-platform
+# install dir on top of vendor/lib/ to keep mac/linux artifacts
+# isolated; ignore those siblings too.
 vendor/lib/
+vendor/lib-*/
 
 # fhetch_driver test-harness output cache dirs
 fhetch_driver_source_*/
