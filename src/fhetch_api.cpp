@@ -11,15 +11,22 @@
 #include "niobium/compiler.h"
 #include "compiler_internal.h"
 
-#include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <cstddef>
+#include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
+#include <utility>
 
 namespace niobium::fhetch {
 

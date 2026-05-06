@@ -31,9 +31,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
+#include <istream>
 #include <sstream>
+#include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace niobium::fhetch {
 
