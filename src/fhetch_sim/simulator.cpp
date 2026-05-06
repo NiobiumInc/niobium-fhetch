@@ -64,7 +64,7 @@ struct Simulator::Impl {
         if (warned_uninit_addrs.insert(addr).second) {
             std::cerr << "[FHETCH_SIM] WARNING: read from uninitialized address %"
                       << addr << " (first seen at line " << inst.line_number
-                      << ": " << inst.raw_line << ")" << '\n';
+                      << ": " << inst.raw_line << ")" << std::endl;
         }
         scratch.assign(ring_dim, 0);
         return scratch;
@@ -72,7 +72,7 @@ struct Simulator::Impl {
 
     void error(const Instruction& inst, const std::string& msg) {
         std::cerr << "[FHETCH_SIM] ERROR line " << inst.line_number
-                  << ": " << msg << "\n  " << inst.raw_line << '\n';
+                  << ": " << msg << "\n  " << inst.raw_line << std::endl;
         error_count++;
     }
 
@@ -362,7 +362,7 @@ struct Simulator::Impl {
 
         std::cout << "[FHETCH_SIM] Executing " << total << " instructions, "
                   << trace.modulus_table.size() << " moduli, N=" << ring_dim
-                  << '\n';
+                  << std::endl;
 
         // Per-instruction dump: NIOBIUM_DEBUG_INSTR=N prints every instruction's
         // result for the first N instructions. Set N=-1 for all.
@@ -438,7 +438,7 @@ struct Simulator::Impl {
                               << "," << (v.size()>1?v[1]:0)
                               << "," << (v.size()>2?v[2]:0)
                               << "," << (v.size()>3?v[3]:0)
-                              << '\n';
+                              << std::endl;
                 }
             }
 
@@ -458,7 +458,7 @@ struct Simulator::Impl {
         std::cout << "\r[FHETCH_SIM] Complete: " << executed << " executed, "
                   << error_count << " errors, "
                   << std::fixed << std::setprecision(2) << elapsed << "s"
-                  << '\n';
+                  << std::endl;
 
         return {executed, error_count, elapsed};
     }
@@ -478,7 +478,7 @@ void Simulator::set_ring_dimension(uint64_t N) {
 bool Simulator::load_trace(const std::filesystem::path& trace_file) {
     std::ifstream in(trace_file);
     if (!in.is_open()) {
-        std::cerr << "[FHETCH_SIM] Cannot open: " << trace_file << '\n';
+        std::cerr << "[FHETCH_SIM] Cannot open: " << trace_file << std::endl;
         return false;
     }
     std::string content((std::istreambuf_iterator<char>(in)),
@@ -487,7 +487,7 @@ bool Simulator::load_trace(const std::filesystem::path& trace_file) {
 
     std::cout << "[FHETCH_SIM] Loaded: " << trace_file << "\n"
               << "  Modulus table: " << impl_->trace.modulus_table.size() << " entries\n"
-              << "  Instructions:  " << impl_->trace.instructions.size() << '\n';
+              << "  Instructions:  " << impl_->trace.instructions.size() << std::endl;
     return !impl_->trace.instructions.empty();
 }
 
@@ -499,7 +499,7 @@ void Simulator::store_polynomial(uint64_t address,
 
 SimResult Simulator::run() {
     if (impl_->ring_dim == 0) {
-        std::cerr << "[FHETCH_SIM] ring dimension not set" << '\n';
+        std::cerr << "[FHETCH_SIM] ring dimension not set" << std::endl;
         return {0, 1, 0.0};
     }
     return impl_->execute();

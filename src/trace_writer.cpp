@@ -144,7 +144,7 @@ std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
 
     std::ofstream out(path);
     if (!out.is_open()) {
-        std::cerr << "[FHETCH] ERROR: Cannot write trace to " << path << '\n';
+        std::cerr << "[FHETCH] ERROR: Cannot write trace to " << path << std::endl;
         return {};
     }
 
@@ -188,7 +188,7 @@ std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
     out.close();
     std::cout << "[FHETCH] Trace written: " << path
               << " (" << instructions_.size() << " instructions, "
-              << modulus_table_.size() << " moduli)" << '\n';
+              << modulus_table_.size() << " moduli)" << std::endl;
     return path;
 }
 
