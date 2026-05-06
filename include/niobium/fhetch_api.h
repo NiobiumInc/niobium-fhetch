@@ -646,10 +646,15 @@ MRP mr_automorph_eval(const MRP& x, uint64_t k);
 
 /// MRP negacyclic rotation in coefficient representation:
 ///   z[q] = sr_rot_automorph_coeff(x[q], offset, q)
-/// for every q in x.base(). `offset` is in [0, N-1] and shifts coefficients
-/// cyclically with a sign flip on wraparound (X^N = -1). Operates on
-/// coefficient-form polys; the eval-form Galois automorphism above is the
-/// separate op for slot rotation.
+/// for every q in x.base(). `offset` is in [0, N-1]. Per residue:
+///   z[q][i] = signs[i] * x[q][(i + offset) mod N]
+///   signs[i] = (-1)^((i + offset) // N)
+/// i.e. each output coefficient reads from `offset` slots ahead in the
+/// input, with a sign flip when the read wraps past N (because X^N = -1).
+/// This is multiplication by X^{-offset} in R_q = Z_q[X]/(X^N+1) — a
+/// LEFT shift of the coefficient vector. Operates on coefficient-form
+/// polys; the eval-form Galois automorphism above is the separate op for
+/// slot rotation.
 MRP mr_rot_automorph_coeff(const MRP& x, uint64_t offset);
 
 /// Construct a zero-initialized MRP with the given base and ring dimension.

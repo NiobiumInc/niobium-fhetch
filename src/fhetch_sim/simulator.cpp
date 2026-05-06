@@ -278,6 +278,38 @@ struct Simulator::Impl {
         return true;
     }
 
+    bool exec_rot_automorph_coeff(const Instruction& inst) {
+        // Negacyclic-coefficient rotation per the FHETCH spec:
+        //   result[i] = signs[i] * src[(i + offset) mod N]
+        //   signs[i] = (-1)^((i + offset) // N)
+        // i.e. result[i] reads src at the position offset slots ahead,
+        // with a sign flip when the read wraps past N (because X^N = -1).
+        // This is multiplication by X^{-offset} (= X^{2N-offset}) in
+        // R_q = Z_q[X]/(X^N+1), a left shift of the coefficient vector.
+        uint64_t q = resolve_modulus(inst.modulus_index);
+        std::vector<uint64_t> scratch;
+        const auto& a = get_or_zero(inst.src1, scratch, inst);
+        if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
+        if (!inst.offset.has_value()) {
+            error(inst, "rotation missing offset"); return false;
+        }
+        const uint64_t offset = inst.offset.value();
+
+        std::vector<uint64_t> result(ring_dim, 0);
+        for (uint64_t i = 0; i < ring_dim; ++i) {
+            const uint64_t src_pos = i + offset;
+            if (src_pos < ring_dim) {
+                result[i] = a[src_pos];
+            } else {
+                // (q - a[k]) % q yields 0 when a[k]==0 and (q - a[k]) when
+                // a[k] != 0, keeping result in [0, q).
+                result[i] = (q - a[src_pos - ring_dim]) % q;
+            }
+        }
+        memory.set(inst.dest, std::move(result), q);
+        return true;
+    }
+
     bool exec_intt(const Instruction& inst) {
         uint64_t q = resolve_modulus(inst.modulus_index);
         std::vector<uint64_t> scratch;
@@ -340,10 +372,14 @@ struct Simulator::Impl {
 
             case OpCode::SR_AUTOMORPH_EVAL: ok = exec_automorph_eval(inst); break;
 
+            case OpCode::SR_ROT_AUTOMORPH_COEFF: ok = exec_rot_automorph_coeff(inst); break;
+
             case OpCode::SR_PERMUTE:
             case OpCode::SR_AUTOMORPH_COEFF:
-            case OpCode::SR_ROT_AUTOMORPH_COEFF:
-                // TODO: COEFF-form automorphism not yet used by our tests
+                // TODO: general permutation and Galois X^k in coefficient form
+                // not yet implemented; the eval-form Galois automorphism and
+                // the negacyclic-coefficient rotation handlers above cover
+                // the cases haze surfaces.
                 ok = true;
                 break;
 
