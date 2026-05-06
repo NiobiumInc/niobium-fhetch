@@ -7,11 +7,18 @@
 #include "compiler_internal.h"
 #include "trace_writer.h"
 
+#include <cstdint>
+#include <memory>
+#include <cstdlib>
+#include <algorithm>
 #include <nlohmann/json.hpp>
 
 #include <spawn.h>
+#include <string>
+#include <sys/_types/_pid_t.h>
 #include <sys/wait.h>
-#include <unistd.h>
+#include <vector>
+#include <utility>
 
 // `environ` is POSIX-required globally but not declared by <unistd.h>
 // uniformly across platforms (Darwin needs the explicit extern).
@@ -23,7 +30,6 @@ extern char** environ;
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <map>
 #include <set>
 
 // OpenFHE hollow mode global — defined in libOPENFHEcore.

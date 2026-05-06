@@ -7,6 +7,7 @@
 
 #include "niobium/fhetch_sim/simulator.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>

@@ -18,7 +18,12 @@
 #include "scheme/ckksrns/ckksrns-fhe.h"
 
 #include "cereal_io.h"
+#include <algorithm>
 #include <cereal/archives/portable_binary.hpp>
+#include <cstdint>
+#include <exception>
+#include <cstddef>
+#include <cstdlib>
 #include <nlohmann/json.hpp>
 
 #include <atomic>
@@ -26,8 +31,10 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using DCRTPoly = lbcrypto::DCRTPoly;

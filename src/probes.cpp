@@ -11,11 +11,15 @@
 #include "niobium/compiler.h"
 #include "compiler_internal.h"
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstddef>
 #include <iostream>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 // ============================================================================
 // Address map: OpenFHE polynomial ID → FHETCH trace address
