@@ -181,7 +181,7 @@ void Compiler::init(int& argc, char** argv) {
 
     if (impl_->target != "local") {
         std::cout << "[NIOBIUM] Target: " << impl_->target
-                  << " (replay will hand off to nbcc_fhetch_replay)" << '\n';
+                  << " (replay will hand off to nbcc_fhetch_replay)" << std::endl;
     }
 }
 
@@ -196,7 +196,7 @@ bool Compiler::start() {
     impl_->running = true;
     impl_->stopped = false;
     impl_->trace_writer.start_recording();
-    std::cout << "[NIOBIUM] Recording started" << '\n';
+    std::cout << "[NIOBIUM] Recording started" << std::endl;
     return true;
 }
 
@@ -233,7 +233,7 @@ bool Compiler::stop() {
 
     std::cout << "[NIOBIUM] Recording stopped ("
               << impl_->trace_writer.instruction_count()
-              << " instructions)" << '\n';
+              << " instructions)" << std::endl;
     return true;
 }
 
@@ -423,9 +423,9 @@ void Compiler::enable_hollow_mode(bool enabled) {
     impl_->hollow_mode = enabled;
     lbcrypto::g_hollow_mode = enabled;
     if (enabled) {
-        std::cout << "[NIOBIUM] Hollow mode ENABLED — skipping polynomial math" << '\n';
+        std::cout << "[NIOBIUM] Hollow mode ENABLED — skipping polynomial math" << std::endl;
     } else {
-        std::cout << "[NIOBIUM] Hollow mode DISABLED — using real math" << '\n';
+        std::cout << "[NIOBIUM] Hollow mode DISABLED — using real math" << std::endl;
     }
 }
 
@@ -496,13 +496,13 @@ bool Compiler::replay() {
         if (std::filesystem::exists(path)) {
             impl_->last_trace_path = path;
         } else {
-            std::cerr << "[NIOBIUM] No trace file found for replay" << '\n';
+            std::cerr << "[NIOBIUM] No trace file found for replay" << std::endl;
             return false;
         }
     }
 
     if (impl_->ring_dimension == 0) {
-        std::cerr << "[NIOBIUM] Ring dimension not set — call capture_crypto_context() before replay()" << '\n';
+        std::cerr << "[NIOBIUM] Ring dimension not set — call capture_crypto_context() before replay()" << std::endl;
         return false;
     }
 
@@ -547,13 +547,13 @@ bool Compiler::replay() {
         }
     }
 
-    std::cout << "[NIOBIUM] Replaying trace: " << impl_->last_trace_path << '\n';
+    std::cout << "[NIOBIUM] Replaying trace: " << impl_->last_trace_path << std::endl;
 
     impl_->simulator = std::make_unique<fhetch_sim::Simulator>();
     impl_->simulator->set_ring_dimension(impl_->ring_dimension);
 
     if (!impl_->simulator->load_trace(impl_->last_trace_path)) {
-        std::cerr << "[NIOBIUM] Failed to load trace for replay" << '\n';
+        std::cerr << "[NIOBIUM] Failed to load trace for replay" << std::endl;
         return false;
     }
 
@@ -598,7 +598,7 @@ bool Compiler::replay() {
         std::cout << "[NIOBIUM]   " << input.name << ": "
                   << input.elements.size() << " elements, "
                   << live << " live-in, " << aux << " aux (for parent chain)"
-                  << '\n';
+                  << std::endl;
     }
 
     // Propagate data through the copy/move lineage. Both directions:
@@ -664,7 +664,7 @@ bool Compiler::replay() {
         }
         if (force_dump || zero_addrs > 0) {
             std::cout << "[NIOBIUM-DBG] live-in data check ("
-                      << zero_addrs << " all-zero of " << rbw_set.size() << "):" << '\n';
+                      << zero_addrs << " all-zero of " << rbw_set.size() << "):" << std::endl;
             std::vector<uint64_t> sorted(rbw_set.begin(), rbw_set.end());
             std::sort(sorted.begin(), sorted.end());
             for (uint64_t a : sorted) {
@@ -680,7 +680,7 @@ bool Compiler::replay() {
                           << "," << (v.size()>2?v[2]:0)
                           << "," << (v.size()>3?v[3]:0)
                           << (all_zero ? "  [ALL-ZERO]" : "")
-                          << '\n';
+                          << std::endl;
             }
         }
     }
@@ -694,17 +694,17 @@ bool Compiler::replay() {
                 captured_addrs.insert(e.addr_id);
         std::cout << "[NIOBIUM-DBG] unloaded live-in: min=" << unloaded.front()
                   << " max=" << unloaded.back() << " count=" << unloaded.size()
-                  << '\n';
+                  << std::endl;
         std::cout << "[NIOBIUM-DBG] captured addrs: ";
         std::vector<uint64_t> sorted_cap(captured_addrs.begin(), captured_addrs.end());
         std::sort(sorted_cap.begin(), sorted_cap.end());
         if (!sorted_cap.empty())
             std::cout << "min=" << sorted_cap.front() << " max=" << sorted_cap.back()
                       << " count=" << sorted_cap.size();
-        std::cout << '\n';
+        std::cout << std::endl;
         size_t overlap = 0;
         for (uint64_t a : unloaded) if (captured_addrs.count(a)) ++overlap;
-        std::cout << "[NIOBIUM-DBG] unloaded ∩ captured = " << overlap << '\n';
+        std::cout << "[NIOBIUM-DBG] unloaded ∩ captured = " << overlap << std::endl;
     }
 
     std::cout << "[NIOBIUM] Live-in: " << rbw_set.size()
@@ -718,17 +718,17 @@ bool Compiler::replay() {
         }
         std::cout << "]";
     }
-    std::cout << '\n';
+    std::cout << std::endl;
 
     auto result = impl_->simulator->run();
 
     if (result.errors > 0) {
-        std::cerr << "[NIOBIUM] Replay failed: " << result.errors << " errors" << '\n';
+        std::cerr << "[NIOBIUM] Replay failed: " << result.errors << " errors" << std::endl;
         return false;
     }
 
     std::cout << "[NIOBIUM] Replay complete: " << result.instructions_executed
-              << " instructions, " << result.elapsed_seconds << "s" << '\n';
+              << " instructions, " << result.elapsed_seconds << "s" << std::endl;
 
     // Write output polynomial values for probe addresses
     write_replay_outputs();
@@ -778,7 +778,7 @@ bool Compiler::dispatch_to_compiler_target() {
 
     std::cout << "[NIOBIUM] Dispatching replay to compiler target '"
               << impl_->target << "' via: " << exec << " "
-              << project_arg << " " << target_arg << '\n';
+              << project_arg << " " << target_arg << std::endl;
 
     pid_t pid = 0;
     int spawn_err = ::posix_spawnp(&pid, exec.c_str(), nullptr, nullptr,
@@ -795,12 +795,12 @@ bool Compiler::dispatch_to_compiler_target() {
         }
     } else {
         std::cerr << "[NIOBIUM] posix_spawnp failed: errno=" << spawn_err
-                  << '\n';
+                  << std::endl;
     }
     if (rc != 0) {
         std::cerr << "[NIOBIUM] nbcc_fhetch_replay failed (exit " << rc
                   << "). Is the binary on PATH, or NBCC_FHETCH_REPLAY set?"
-                  << '\n';
+                  << std::endl;
         return false;
     }
 
@@ -810,12 +810,12 @@ bool Compiler::dispatch_to_compiler_target() {
     if (!std::filesystem::exists(probes_dir) ||
         std::filesystem::is_empty(probes_dir)) {
         std::cerr << "[NIOBIUM] nbcc_fhetch_replay reported success but produced "
-                     "no serialized probes in " << probes_dir << '\n';
+                     "no serialized probes in " << probes_dir << std::endl;
         return false;
     }
 
     std::cout << "[NIOBIUM] Compiler-target replay complete. Probes in "
-              << probes_dir << '\n';
+              << probes_dir << std::endl;
     return true;
 }
 
@@ -911,7 +911,7 @@ void Compiler::write_replay_json() {
         inputs_index["input_count"] = inputs_arr.size();
         std::ofstream inp_out(dir / inputs_index_file);
         if (inp_out.is_open()) {
-            inp_out << inputs_index.dump(2) << '\n';
+            inp_out << inputs_index.dump(2) << std::endl;
             inp_out.close();
         }
     }
@@ -944,7 +944,7 @@ void Compiler::write_replay_json() {
         outputs_data["outputs"] = outputs_arr;
         std::ofstream out_out(dir / outputs_file);
         if (out_out.is_open()) {
-            out_out << outputs_data.dump(2) << '\n';
+            out_out << outputs_data.dump(2) << std::endl;
             out_out.close();
         }
     }
@@ -997,9 +997,9 @@ void Compiler::write_replay_json() {
 
     std::ofstream out(path);
     if (out.is_open()) {
-        out << replay.dump(2) << '\n';
+        out << replay.dump(2) << std::endl;
         out.close();
-        std::cout << "[NIOBIUM] Replay JSON written: " << path << '\n';
+        std::cout << "[NIOBIUM] Replay JSON written: " << path << std::endl;
     }
 }
 
@@ -1037,9 +1037,9 @@ void Compiler::write_replay_outputs() {
 
     std::ofstream out(path);
     if (out.is_open()) {
-        out << root.dump(2) << '\n';
+        out << root.dump(2) << std::endl;
         out.close();
-        std::cout << "[NIOBIUM] Replay outputs written: " << path << '\n';
+        std::cout << "[NIOBIUM] Replay outputs written: " << path << std::endl;
     }
 }
 

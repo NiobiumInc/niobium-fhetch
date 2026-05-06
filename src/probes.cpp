@@ -64,7 +64,7 @@ static void dbg_track(const char* event, uintptr_t openfhe_id, uintptr_t fhetch_
     std::cerr << "[TRACK %" << fhetch_addr << "] " << event
               << " openfhe_id=0x" << std::hex << openfhe_id << std::dec
               << (note ? std::string(" ") + note : std::string())
-              << '\n';
+              << std::endl;
 }
 
 static uintptr_t map_address(uintptr_t openfhe_id) {

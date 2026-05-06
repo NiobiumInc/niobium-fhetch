@@ -210,17 +210,17 @@ void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
             if (!lbcrypto::Serial::SerializeToFile(cc_path.string(), cc,
                                                    lbcrypto::SerType::BINARY)) {
                 std::cerr << "[NIOBIUM] WARNING: Failed to serialize crypto context to "
-                          << cc_path << '\n';
+                          << cc_path << std::endl;
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "[NIOBIUM] WARNING: CC serialize raised: " << e.what() << '\n';
+        std::cerr << "[NIOBIUM] WARNING: CC serialize raised: " << e.what() << std::endl;
     }
 
     std::cout << "[NIOBIUM] Captured crypto context: scheme=" << scheme
               << " ring_dim=" << rd
               << " depth=" << depth
-              << " moduli=" << modulus_chain.size() << '\n';
+              << " moduli=" << modulus_chain.size() << std::endl;
 }
 
 // Ciphertext serialization helpers shared by Compiler::tag_input<Ciphertext>
@@ -238,7 +238,7 @@ static bool write_ciphertext_input_files(
     auto ids_path = dir / (prog + ".input_" + input_name + ".ids");
     if (!niobium::cereal_io::write_addr_ids(ids_path, addr_ids)) {
         std::cerr << "[NIOBIUM] WARNING: Failed to write addr-id file "
-                  << ids_path << '\n';
+                  << ids_path << std::endl;
         return false;
     }
 
@@ -246,7 +246,7 @@ static bool write_ciphertext_input_files(
     std::ofstream bin_stream(bin_path, std::ios::binary);
     if (!bin_stream.is_open()) {
         std::cerr << "[NIOBIUM] WARNING: Failed to open input bin "
-                  << bin_path << " for writing" << '\n';
+                  << bin_path << " for writing" << std::endl;
         return false;
     }
     cereal::PortableBinaryOutputArchive ar(bin_stream);
@@ -273,7 +273,7 @@ static bool write_ciphertext_template_file(
     std::filesystem::create_directories(tdir);
     auto path = tdir / (name + ".template");
     if (!lbcrypto::Serial::SerializeToFile(path.string(), ct, lbcrypto::SerType::BINARY)) {
-        std::cerr << "[NIOBIUM] WARNING: Failed to write ciphertext template " << path << '\n';
+        std::cerr << "[NIOBIUM] WARNING: Failed to write ciphertext template " << path << std::endl;
         return false;
     }
     return true;
@@ -435,7 +435,7 @@ static size_t capture_dcrt_polys(Compiler& compiler,
                           << "," << (n>2?vals[2]:0)
                           << "," << (n>3?vals[3]:0)
                           << (any_nonzero ? "" : "  [ALL-ZERO]")
-                          << '\n';
+                          << std::endl;
             }
 
             compiler.store_input_element(key_name, fhetch_addr, modulus, vals);
@@ -448,7 +448,7 @@ static size_t capture_dcrt_polys(Compiler& compiler,
                   << " polys";
         if (coeff_count) std::cout << "  (" << coeff_count << " still in COEFF form!)";
         if (zero_count)  std::cout << "  (" << zero_count << " all-zero)";
-        std::cout << '\n';
+        std::cout << std::endl;
     }
     return count;
 }
@@ -509,7 +509,7 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
     std::cout << "[NIOBIUM] captured " << name << ": " << towers.size()
               << " polys";
     if (zero_count) std::cout << "  (" << zero_count << " all-zero)";
-    std::cout << '\n';
+    std::cout << std::endl;
 
     auto dir = niobium::compiler().get_program_directory();
     std::filesystem::create_directories(dir);
@@ -610,7 +610,7 @@ void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
         }
     } catch (...) {}
 
-    std::cout << "[NIOBIUM] Tagged " << total << " key polynomials for replay" << '\n';
+    std::cout << "[NIOBIUM] Tagged " << total << " key polynomials for replay" << std::endl;
 }
 
 // Capture the CKKS bootstrap precomputation plaintexts so the simulator
@@ -683,17 +683,17 @@ void Compiler::tag_bootstrap_precompute<lbcrypto::CryptoContext<DCRTPoly>>(
         for (const auto& inner : precom->m_U0hatTPreFFT)
             for (const auto& pt : inner) capture_pt(pt);
         std::cout << "[NIOBIUM-DBG]   slots=" << slots
-                  << " m_U0hatTPreFFT addrs=" << range(s0) << '\n';
+                  << " m_U0hatTPreFFT addrs=" << range(s0) << std::endl;
         size_t s1 = addr_ids.size();
         for (const auto& inner : precom->m_U0PreFFT)
             for (const auto& pt : inner) capture_pt(pt);
-        std::cout << "[NIOBIUM-DBG]   m_U0PreFFT    addrs=" << range(s1) << '\n';
+        std::cout << "[NIOBIUM-DBG]   m_U0PreFFT    addrs=" << range(s1) << std::endl;
         size_t s2 = addr_ids.size();
         for (const auto& pt : precom->m_U0Pre) capture_pt(pt);
-        std::cout << "[NIOBIUM-DBG]   m_U0Pre       addrs=" << range(s2) << '\n';
+        std::cout << "[NIOBIUM-DBG]   m_U0Pre       addrs=" << range(s2) << std::endl;
         size_t s3 = addr_ids.size();
         for (const auto& pt : precom->m_U0hatTPre) capture_pt(pt);
-        std::cout << "[NIOBIUM-DBG]   m_U0hatTPre   addrs=" << range(s3) << '\n';
+        std::cout << "[NIOBIUM-DBG]   m_U0hatTPre   addrs=" << range(s3) << std::endl;
     }
 
     std::cout << "[NIOBIUM] Tagged " << addr_ids.size()
@@ -701,7 +701,7 @@ void Compiler::tag_bootstrap_precompute<lbcrypto::CryptoContext<DCRTPoly>>(
               << " (precompute probe fired " << niobium::detail::niobium_precompute_probe_count()
               << " times, " << niobium::detail::niobium_precompute_probe_already_mapped_count()
               << " already mapped)"
-              << '\n';
+              << std::endl;
 
     // Write .bp.bin and .bp.ids to disk (compiler-parity format).
     auto dir = get_program_directory();
@@ -751,7 +751,7 @@ void Compiler::tag_bootstrap_precompute<lbcrypto::CryptoContext<DCRTPoly>>(
     bin.close();
     std::cout << "[NIOBIUM] Wrote bootstrap precompute: "
               << bin_path.filename().string() << " + "
-              << ids_path.filename().string() << '\n';
+              << ids_path.filename().string() << std::endl;
 }
 
 // ============================================================================
@@ -829,7 +829,7 @@ void niobium::Compiler::refresh_all_inputs() {
     } catch (...) {}
 
     std::cout << "[NIOBIUM] Refreshed " << total
-              << " polynomials from live OpenFHE objects" << '\n';
+              << " polynomials from live OpenFHE objects" << std::endl;
 }
 
 // ============================================================================
@@ -866,7 +866,7 @@ void Compiler::reconstruct_probes() const {
 
         lbcrypto::Ciphertext<DCRTPoly> ct;
         if (!lbcrypto::Serial::DeserializeFromFile(template_path.string(), ct, lbcrypto::SerType::BINARY)) {
-            std::cerr << "[NIOBIUM] Failed to load template for " << name << '\n';
+            std::cerr << "[NIOBIUM] Failed to load template for " << name << std::endl;
             continue;
         }
 
@@ -894,7 +894,7 @@ void Compiler::reconstruct_probes() const {
 
         auto ct_path = serialized_dir / (name + ".ct");
         if (lbcrypto::Serial::SerializeToFile(ct_path.string(), ct, lbcrypto::SerType::BINARY)) {
-            std::cout << "[NIOBIUM] Serialized probe '" << name << "' to " << ct_path << '\n';
+            std::cout << "[NIOBIUM] Serialized probe '" << name << "' to " << ct_path << std::endl;
         }
     }
 }
@@ -912,11 +912,11 @@ bool Compiler::result<lbcrypto::CryptoContext<DCRTPoly>, lbcrypto::Ciphertext<DC
     auto serialized_path = dir / "serialized_probes" / (var_name + ".ct");
     if (std::filesystem::exists(serialized_path)) {
         if (lbcrypto::Serial::DeserializeFromFile(serialized_path.string(), ct_result, lbcrypto::SerType::BINARY)) {
-            std::cout << "[NIOBIUM] Loaded result '" << var_name << "' from serialized probe" << '\n';
+            std::cout << "[NIOBIUM] Loaded result '" << var_name << "' from serialized probe" << std::endl;
             return true;
         }
     }
-    std::cerr << "[NIOBIUM] Result '" << var_name << "' not found" << '\n';
+    std::cerr << "[NIOBIUM] Result '" << var_name << "' not found" << std::endl;
     return false;
 }
 
