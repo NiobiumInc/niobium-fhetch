@@ -125,7 +125,7 @@ static bool load_input_bin(const fs::path& bin_path,
     return true;
 }
 
-// Read a key .mk.bin / .rk.bin / .bp.bin file written by auto_facade's
+// Read a key .mk.bin / .rk.bin file written by auto_facade's
 // serialize_eval_keys. Layout is:
 //   uint32_t num_keys
 //   for each key:
@@ -158,6 +158,72 @@ static bool load_key_bin(const fs::path& bin_path,
                 ar(dcrt);
                 extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
             }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[fhetch_driver] failed to read " << bin_path
+                  << ": " << e.what() << std::endl;
+        return false;
+    }
+    return true;
+}
+
+// Read a .bp.bin file written by auto_facade's tag_bootstrap_precompute.
+// Layout (matches the writer in src/auto_facade.cpp):
+//   uint32_t num_boot_entries
+//   for each entry:
+//     uint32_t m_slots
+//     uint32_t m_dim1
+//     2 x (9 x uint32_t)   // m_paramsEnc, m_paramsDec
+//     2 x 2D-DCRTPoly      // m_U0hatTPreFFT, m_U0PreFFT
+//     2 x 1D-DCRTPoly      // m_U0Pre, m_U0hatTPre
+// 2D layout: uint32 outer_size; per inner: uint32 inner_size, DCRTPoly...
+// 1D layout: uint32 size; DCRTPoly...
+static bool load_bp_bin(const fs::path& bin_path,
+                        const std::vector<uint64_t>& ids,
+                        niobium::fhetch::DriveInputs& inputs) {
+    std::ifstream f(bin_path, std::ios::binary);
+    if (!f.is_open()) return false;
+    try {
+        cereal::PortableBinaryInputArchive ar(f);
+        uint32_t num_entries = 0;
+        ar(num_entries);
+        auto id_it = ids.begin();
+        for (uint32_t e = 0; e < num_entries; ++e) {
+            uint32_t m_slots = 0, m_dim1 = 0;
+            ar(m_slots);
+            ar(m_dim1);
+            for (int p = 0; p < 2; ++p) {
+                uint32_t lvlb, layersCollapse, remCollapse, numRotations,
+                         b, g, numRotationsRem, bRem, gRem;
+                ar(lvlb, layersCollapse, remCollapse, numRotations,
+                   b, g, numRotationsRem, bRem, gRem);
+            }
+            auto read_2d = [&]() {
+                uint32_t outer_size = 0;
+                ar(outer_size);
+                for (uint32_t i = 0; i < outer_size; ++i) {
+                    uint32_t inner_size = 0;
+                    ar(inner_size);
+                    for (uint32_t j = 0; j < inner_size; ++j) {
+                        DCRTPoly dcrt;
+                        ar(dcrt);
+                        extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
+                    }
+                }
+            };
+            auto read_1d = [&]() {
+                uint32_t size = 0;
+                ar(size);
+                for (uint32_t i = 0; i < size; ++i) {
+                    DCRTPoly dcrt;
+                    ar(dcrt);
+                    extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
+                }
+            };
+            read_2d();   // m_U0hatTPreFFT
+            read_2d();   // m_U0PreFFT
+            read_1d();   // m_U0Pre
+            read_1d();   // m_U0hatTPre
         }
     } catch (const std::exception& e) {
         std::cerr << "[fhetch_driver] failed to read " << bin_path
@@ -201,21 +267,21 @@ static bool load_source_inputs(const fs::path& source_dir,
     return true;
 }
 
-// Load keys (mk.bin, rk.bin, bp.bin) if present. Keys use a different cereal
-// layout from inputs — see load_key_bin above.
+// Load keys (mk.bin, rk.bin, bp.bin) if present. mk/rk use the eval-key
+// layout (load_key_bin); bp uses a different precompute layout (load_bp_bin).
 static bool load_source_keys(const fs::path& source_dir,
                              const std::string& program_name,
                              niobium::fhetch::DriveInputs& inputs) {
-    auto load_pair = [&](const std::string& base) {
+    auto load_with = [&](const std::string& base, auto&& reader) {
         fs::path bin = source_dir / (program_name + "." + base + ".bin");
         fs::path ids = source_dir / (program_name + "." + base + ".ids");
         if (!fs::exists(bin) || !fs::exists(ids)) return;
         auto addr_ids = read_ids(ids);
-        load_key_bin(bin, addr_ids, inputs);
+        reader(bin, addr_ids, inputs);
     };
-    load_pair("mk");
-    load_pair("rk");
-    load_pair("bp");
+    load_with("mk", load_key_bin);
+    load_with("rk", load_key_bin);
+    load_with("bp", load_bp_bin);
     return true;
 }
 

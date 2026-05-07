@@ -470,11 +470,15 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
     if (!dcrt_poly_ptr) return;
     const auto* dcrt = static_cast<const lbcrypto::DCRTPoly*>(dcrt_poly_ptr);
 
-    // Name keyed on pointer address, matching niobium-compiler's convention
-    // (e.g. "dcrtpoly_16bd1e2d8").
+    // Each call is an independent input. The pointer can't be used as an
+    // identifier — OpenFHE constructs DCRTPolys as stack locals (e.g. the
+    // monomial in MultByMonomialInPlace), so successive calls during a
+    // single EvalBootstrap routinely reuse the same address with different
+    // contents. Use a per-recording counter so each capture gets its own
+    // .bin/.ids pair on disk.
+    static std::atomic<uint64_t> counter{0};
     std::ostringstream name_stream;
-    name_stream << "dcrtpoly_" << std::hex
-                << reinterpret_cast<uintptr_t>(dcrt);
+    name_stream << "dcrtpoly_" << counter.fetch_add(1);
     std::string name = name_stream.str();
 
     // IMPORTANT: walk the ORIGINAL DCRTPoly's towers — do NOT copy it first.
