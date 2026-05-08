@@ -133,6 +133,9 @@ struct Compiler::Impl {
             name += "_" + cache_suffix;
         return name;
     }
+
+    // Logging verbosity
+    bool verbose =  false;
 };
 
 // ============================================================================
@@ -161,7 +164,7 @@ Compiler::~Compiler() = default;
 
 void Compiler::init(int& argc, char** argv) {
     // Parse and consume Niobium-specific flags from argv.
-    // Recognized flags: --hollow, --multithreaded, --target=<value>
+    // Recognized flags: --hollow, --multithreaded, --target=<value>, -v
     int write_pos = 1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -173,6 +176,8 @@ void Compiler::init(int& argc, char** argv) {
             impl_->target = a + 9;
         } else if (std::strcmp(a, "--target") == 0 && i + 1 < argc) {
             impl_->target = argv[++i];
+        } else if (std::strcmp(a, "-v") == 0) {
+            impl_->verbose = true;
         } else {
             argv[write_pos++] = argv[i];
         }
@@ -595,10 +600,12 @@ bool Compiler::replay() {
             if (rbw_set.count(elem.addr_id)) ++live;
             else ++aux;
         }
-        std::cout << "[NIOBIUM]   " << input.name << ": "
-                  << input.elements.size() << " elements, "
-                  << live << " live-in, " << aux << " aux (for parent chain)"
-                  << std::endl;
+        if (impl_->verbose) {
+            std::cout << "[NIOBIUM]   " << input.name << ": "
+                    << input.elements.size() << " elements, "
+                    << live << " live-in, " << aux << " aux (for parent chain)"
+                    << std::endl;
+        }
     }
 
     // Propagate data through the copy/move lineage. Both directions:
@@ -673,14 +680,16 @@ bool Compiler::replay() {
                 uint64_t q = impl_->simulator->get_modulus(a);
                 bool all_zero = true;
                 for (uint64_t x : v) if (x != 0) { all_zero = false; break; }
-                std::cout << "[NIOBIUM-DBG]   %" << a
-                          << " q=0x" << std::hex << q << std::dec
-                          << " v[0..3]=" << (!v.empty()?v[0]:0)
-                          << "," << (v.size()>1?v[1]:0)
-                          << "," << (v.size()>2?v[2]:0)
-                          << "," << (v.size()>3?v[3]:0)
-                          << (all_zero ? "  [ALL-ZERO]" : "")
-                          << std::endl;
+                if (impl_->verbose) {
+                    std::cout << "[NIOBIUM-DBG]   %" << a
+                            << " q=0x" << std::hex << q << std::dec
+                            << " v[0..3]=" << (!v.empty()?v[0]:0)
+                            << "," << (v.size()>1?v[1]:0)
+                            << "," << (v.size()>2?v[2]:0)
+                            << "," << (v.size()>3?v[3]:0)
+                            << (all_zero ? "  [ALL-ZERO]" : "")
+                            << std::endl;
+                }
             }
         }
     }
