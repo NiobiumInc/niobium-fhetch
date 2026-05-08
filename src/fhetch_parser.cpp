@@ -186,10 +186,9 @@ struct Driver {
             auto p = Polynomial::from_data(in_it->second.values, ring_dim,
                                           Format::Evaluation);
             niobium::compiler().store_input_element(
-                "in_" + std::to_string(file_addr),
-                niobium::detail::polynomial_address(p),
-                in_it->second.modulus,
-                in_it->second.values);
+                "in_" + std::to_string(file_addr), niobium::CapturedKind::SRP,
+                /*starts_new_element=*/false, niobium::detail::polynomial_address(p),
+                in_it->second.modulus, in_it->second.values);
             stats.inputs_materialized++;
             auto [ins, _] = polys.emplace(file_addr, std::move(p));
             return ins->second;

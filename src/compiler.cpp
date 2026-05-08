@@ -7,10 +7,13 @@
 #include "compiler_internal.h"
 #include "trace_writer.h"
 
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <cstdlib>
 #include <algorithm>
+#include <type_traits>
+#include <utility>
 #include <nlohmann/json.hpp>
 
 #include <spawn.h>
@@ -102,17 +105,32 @@ struct Compiler::Impl {
     };
     struct InputRecord {
         std::string name;
+        CapturedKind kind;
         std::vector<PolyElement> elements;
+        // Array-element boundaries for SRPArray / MRPArray. element_starts[i]
+        // is the index into `elements` where array position i begins. For
+        // SRP / MRP, element_starts is empty (the whole record is one
+        // logical element). For SRPArray, every entry in `elements` is its own
+        // array position. For MRPArray, element_starts has K entries marking
+        // the M_k-residue boundaries.
+        std::vector<size_t> element_starts;
     };
     std::vector<InputRecord> captured_inputs;
+    // name → index into captured_inputs, so store_input_* doesn't
+    // linear-scan when re-tagging an existing record. Kept in sync
+    // wherever captured_inputs is mutated.
+    std::unordered_map<std::string, size_t> captured_input_index;
 
     // Output probe addresses captured by probe().
     struct OutputRecord {
         std::string name;
+        CapturedKind kind;
         std::vector<uint64_t> addr_ids;
         std::vector<uint64_t> moduli;
+        std::vector<size_t> element_starts;
     };
     std::vector<OutputRecord> captured_outputs;
+    std::unordered_map<std::string, size_t> captured_output_index;
 
     // Hook invoked by stop() right before fhetch_replay.json is written.
     // Set by capture_crypto_context<Ciphertext<DCRTPoly>> to auto-capture
@@ -342,10 +360,12 @@ void Compiler::reserve_addresses(uint64_t next_addr) {
 
 void Compiler::clear_captured_inputs() {
     impl_->captured_inputs.clear();
+    impl_->captured_input_index.clear();
 }
 
 void Compiler::clear_captured_outputs() {
     impl_->captured_outputs.clear();
+    impl_->captured_output_index.clear();
 }
 
 void Compiler::clear_captured() {
@@ -363,7 +383,9 @@ void Compiler::set_post_recording_hook(std::function<void()> fn) {
 
 void Compiler::reset() {
     impl_->captured_inputs.clear();
+    impl_->captured_input_index.clear();
     impl_->captured_outputs.clear();
+    impl_->captured_output_index.clear();
     impl_->trace_writer.clear();
     impl_->program_dir.clear();
     impl_->last_trace_path.clear();
@@ -392,36 +414,72 @@ void Compiler::reset() {
     impl_->post_recording_hook = nullptr;
 }
 
+namespace {
+
+// Find by name, or push a fresh entry whose kind defaults to
+// `default_kind`. Templated to avoid naming Compiler::Impl's private
+// nested record types. The static_asserts spell out the concept that
+// concepts would express directly in C++20+.
+template <typename RecordVec, typename IndexMap>
+auto& find_or_create_record(RecordVec& records, IndexMap& index, const std::string& name,
+                            CapturedKind default_kind) {
+    using R = typename RecordVec::value_type;
+    static_assert(std::is_assignable_v<decltype(std::declval<R&>().name)&, std::string>,
+                  "find_or_create_record: record must have an assignable `name`");
+    static_assert(std::is_assignable_v<decltype(std::declval<R&>().kind)&, CapturedKind>,
+                  "find_or_create_record: record must have an assignable `kind`");
+    auto it = index.find(name);
+    if (it != index.end())
+        return records[it->second];
+    R fresh;
+    fresh.name = name;
+    fresh.kind = default_kind;
+    const size_t idx = records.size();
+    records.push_back(std::move(fresh));
+    index.emplace(name, idx);
+    return records[idx];
+}
+
+}  // namespace
+
+// Re-tagging an existing name with a different kind is a programming
+// error; we drop the residue and report rather than silently corrupting
+// the record. assert() for debug-build fast detection; the cerr + return
+// covers release builds where NDEBUG strips the assert.
 void Compiler::store_input_element(const std::string& input_name,
+                                   CapturedKind kind, bool starts_new_element,
                                    uint64_t addr_id, uint64_t modulus,
                                    const std::vector<uint64_t>& values) {
-    // Append to existing InputRecord or create a new one
-    for (auto& rec : impl_->captured_inputs) {
-        if (rec.name == input_name) {
-            rec.elements.push_back({addr_id, modulus, values});
-            return;
-        }
+    auto& rec = find_or_create_record(impl_->captured_inputs, impl_->captured_input_index,
+                                      input_name, kind);
+    if (rec.kind != kind) {
+        std::cerr << "[NIOBIUM] store_input_element: kind mismatch on '" << input_name
+                  << "' (existing=" << static_cast<int>(rec.kind)
+                  << ", new=" << static_cast<int>(kind) << "); residue dropped" << std::endl;
+        assert(false && "store_input_element: kind mismatch on existing input record");
+        return;
     }
-    Impl::InputRecord rec;
-    rec.name = input_name;
+    if (starts_new_element)
+        rec.element_starts.push_back(rec.elements.size());
     rec.elements.push_back({addr_id, modulus, values});
-    impl_->captured_inputs.push_back(std::move(rec));
 }
 
 void Compiler::store_output_probe(const std::string& output_name,
+                                  CapturedKind kind, bool starts_new_element,
                                   uint64_t addr_id, uint64_t modulus) {
-    for (auto& rec : impl_->captured_outputs) {
-        if (rec.name == output_name) {
-            rec.addr_ids.push_back(addr_id);
-            rec.moduli.push_back(modulus);
-            return;
-        }
+    auto& rec = find_or_create_record(impl_->captured_outputs, impl_->captured_output_index,
+                                      output_name, kind);
+    if (rec.kind != kind) {
+        std::cerr << "[NIOBIUM] store_output_probe: kind mismatch on '" << output_name
+                  << "' (existing=" << static_cast<int>(rec.kind)
+                  << ", new=" << static_cast<int>(kind) << "); residue dropped" << std::endl;
+        assert(false && "store_output_probe: kind mismatch on existing output record");
+        return;
     }
-    Impl::OutputRecord rec;
-    rec.name = output_name;
+    if (starts_new_element)
+        rec.element_starts.push_back(rec.addr_ids.size());
     rec.addr_ids.push_back(addr_id);
     rec.moduli.push_back(modulus);
-    impl_->captured_outputs.push_back(std::move(rec));
 }
 
 void Compiler::enable_hollow_mode(bool enabled) {
@@ -544,7 +602,9 @@ bool Compiler::replay() {
                             // Modulus is unknown here; set to 0. The simulator
                             // uses addr_id only for output-extraction, not
                             // modulus semantics, so the placeholder is safe.
-                            store_output_probe(name, elem.get<uint64_t>(), 0);
+                            store_output_probe(name, CapturedKind::SRP,
+                                               /*starts_new_element=*/false,
+                                               elem.get<uint64_t>(), 0);
                         }
                     }
                 }
@@ -1088,32 +1148,96 @@ Compiler::Impl& compiler_impl(Compiler& c) {
 
 namespace niobium::detail {
 
-// Iterate the Compiler's captured_inputs and call `cb` per polynomial
-// element. Lets external translation units walk per-input state without
-// including the private Impl layout.
-//
+// Iterate the Compiler's captured_inputs / captured_outputs records.
 // The local Impl reference is const so the iteration is structurally
 // read-only: the helpers themselves never mutate captured_inputs /
 // captured_outputs. A misbehaving callback could still mutate Compiler
 // state by reaching back through the niobium::compiler() singleton —
 // callers must not do that mid-iteration (it would invalidate the
 // vector iterator).
-void for_each_captured_input(
-    const std::function<void(const std::string&, uint64_t, uint64_t,
-                              const std::vector<uint64_t>&)>& cb) {
+namespace {
+
+// Build a CapturedShape's per_element_moduli from a flat moduli vector
+// and array-element start offsets. Shared between the input and output
+// iterators below.
+std::vector<std::vector<uint64_t>>
+slice_per_element_moduli(niobium::CapturedKind kind, const std::vector<uint64_t>& flat,
+                         const std::vector<size_t>& element_starts) {
+    using namespace niobium;
+    std::vector<std::vector<uint64_t>> out;
+    if (flat.empty()) {
+        // Edge case: a record with no residues yet. Fall back to one empty
+        // element so callers get a non-empty per_element_moduli they can
+        // size-check without a second branch.
+        out.emplace_back();
+        return out;
+    }
+    switch (kind) {
+        case CapturedKind::SRP:
+        case CapturedKind::MRP: {
+            out.emplace_back(flat.begin(), flat.end());
+            break;
+        }
+        case CapturedKind::SRPArray: {
+            // Every residue is its own array position.
+            out.reserve(flat.size());
+            for (auto q : flat) out.push_back({q});
+            break;
+        }
+        case CapturedKind::MRPArray: {
+            // element_starts delineates per-element residue ranges.
+            // Defensive: if element_starts is empty (e.g. legacy records
+            // rehydrated via the cache-hit path), treat the whole record
+            // as a single MRP element.
+            if (element_starts.empty()) {
+                out.emplace_back(flat.begin(), flat.end());
+                break;
+            }
+            const size_t k = element_starts.size();
+            out.reserve(k);
+            for (size_t i = 0; i < k; ++i) {
+                const size_t lo = element_starts[i];
+                const size_t hi = (i + 1 < k) ? element_starts[i + 1] : flat.size();
+                out.emplace_back(flat.begin() + lo, flat.begin() + hi);
+            }
+            break;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+void for_each_captured_input(const std::function<void(const CapturedInputRecord&)>& cb) {
     const auto& impl = niobium::compiler_impl(niobium::compiler());
     for (const auto& input : impl.captured_inputs) {
-        for (const auto& elem : input.elements) {
-            cb(input.name, elem.addr_id, elem.modulus, elem.values);
+        CapturedInputRecord rec;
+        rec.name = input.name;
+        rec.addr_ids.reserve(input.elements.size());
+        rec.per_residue_values.reserve(input.elements.size());
+        std::vector<uint64_t> flat_moduli;
+        flat_moduli.reserve(input.elements.size());
+        for (const auto& e : input.elements) {
+            rec.addr_ids.push_back(e.addr_id);
+            rec.per_residue_values.push_back(e.values);
+            flat_moduli.push_back(e.modulus);
         }
+        rec.shape.kind = input.kind;
+        rec.shape.per_element_moduli =
+            slice_per_element_moduli(input.kind, flat_moduli, input.element_starts);
+        cb(rec);
     }
 }
 
 void for_each_captured_output(
-    const std::function<void(const std::string&)>& cb) {
+    const std::function<void(const std::string&, const CapturedShape&)>& cb) {
     const auto& impl = niobium::compiler_impl(niobium::compiler());
     for (const auto& output : impl.captured_outputs) {
-        cb(output.name);
+        CapturedShape shape;
+        shape.kind = output.kind;
+        shape.per_element_moduli =
+            slice_per_element_moduli(output.kind, output.moduli, output.element_starts);
+        cb(output.name, shape);
     }
 }
 
