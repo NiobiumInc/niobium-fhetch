@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "niobium/compiler.h"
 #include "trace_writer.h"
 #include <cstdint>
 #include <functional>
@@ -15,6 +16,11 @@
 #include <vector>
 
 namespace niobium::detail {
+
+// CapturedShape and CapturedInputRecord live in niobium/compiler.h so
+// downstream libraries don't need this private header to consume them.
+using niobium::CapturedInputRecord;
+using niobium::CapturedShape;
 
 /// Get the global TraceWriter instance (owned by the Compiler singleton).
 TraceWriter& trace_writer();
@@ -63,14 +69,14 @@ void sync_fhetch_state_to_compiler();
 /// here.
 void save_dcrt_poly_as_input(const void* dcrt_poly_ptr);
 
-/// Iterate captured inputs: cb(name, addr_id, modulus, values) per element.
-void for_each_captured_input(
-    const std::function<void(const std::string&, uint64_t, uint64_t,
-                              const std::vector<uint64_t>&)>& cb);
+/// Iterate captured inputs, once per record (shape + addr_ids +
+/// per-residue values).
+void for_each_captured_input(const std::function<void(const CapturedInputRecord&)>& cb);
 
-/// Iterate captured outputs: cb(name) once per distinct output.
+/// Iterate captured outputs, once per record. Output values aren't
+/// materialized at recording time, so name + shape only.
 void for_each_captured_output(
-    const std::function<void(const std::string&)>& cb);
+    const std::function<void(const std::string&, const CapturedShape&)>& cb);
 
 }  // namespace niobium::detail
 

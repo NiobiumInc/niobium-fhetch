@@ -225,6 +225,14 @@ Format Polynomial::format() const { return impl_ ? impl_->fmt : Format::Evaluati
 bool Polynomial::is_valid() const { return impl_ != nullptr; }
 PolynomialImpl* Polynomial::impl() const { return impl_.get(); }
 
+const std::vector<uint64_t>& Polynomial::int_data() const {
+    if (!impl_)
+        throw std::runtime_error("Polynomial::int_data() called on invalid polynomial");
+    if (impl_->ntype != NumberType::Integer)
+        throw std::runtime_error("Polynomial::int_data() requires an Integer polynomial");
+    return impl_->int_data;
+}
+
 // ============================================================================
 // Scalar
 // ============================================================================
@@ -1333,26 +1341,27 @@ void sync_fhetch_state_to_compiler() {
         return std::vector<uint64_t>(p.ring_dimension(), 0);
     };
 
-    auto try_push_poly = [&](const std::string& name, const Polynomial& p) {
-        if (!p.is_valid()) return;
-        auto it = mod_map.find(p.impl()->address);
-        if (it == mod_map.end()) return;  // never used in a modulus-bearing op
-        cc.store_input_element(name, p.impl()->address, it->second,
-                               data_or_zeros(p));
-    };
-
     // ---- Inputs ----
     for (const auto& e : input_registry()) {
         switch (e.kind) {
-        case InputEntry::POLY:
-            try_push_poly(e.name, e.poly);
+        case InputEntry::POLY: {
+            if (!e.poly.is_valid()) break;
+            auto it = mod_map.find(e.poly.impl()->address);
+            if (it == mod_map.end()) break;  // never used in a modulus-bearing op
+            cc.store_input_element(e.name, niobium::CapturedKind::SRP,
+                                   /*starts_new_element=*/false,
+                                   e.poly.impl()->address, it->second,
+                                   data_or_zeros(e.poly));
             break;
+        }
         case InputEntry::MRP_KIND:
             if (e.mrp.is_valid()) {
                 for (auto q : e.mrp.base()) {
                     const auto& res = e.mrp[q];
                     if (!res.is_valid()) continue;
-                    cc.store_input_element(e.name, res.impl()->address, q,
+                    cc.store_input_element(e.name, niobium::CapturedKind::MRP,
+                                           /*starts_new_element=*/false,
+                                           res.impl()->address, q,
                                            data_or_zeros(res));
                 }
             }
@@ -1361,56 +1370,85 @@ void sync_fhetch_state_to_compiler() {
             if (e.mrpa.is_valid()) {
                 for (size_t i = 0; i < e.mrpa.length(); ++i) {
                     const auto& m = e.mrpa[i];
+                    bool first = true;
                     for (auto q : m.base()) {
                         const auto& res = m[q];
                         if (!res.is_valid()) continue;
-                        cc.store_input_element(e.name, res.impl()->address, q,
+                        cc.store_input_element(e.name, niobium::CapturedKind::MRPArray,
+                                               /*starts_new_element=*/first,
+                                               res.impl()->address, q,
                                                data_or_zeros(res));
+                        first = false;
                     }
                 }
             }
             break;
         case InputEntry::SRPA:
             if (e.srpa.is_valid()) {
-                for (size_t i = 0; i < e.srpa.length(); ++i)
-                    try_push_poly(e.name, e.srpa[i]);
+                for (size_t i = 0; i < e.srpa.length(); ++i) {
+                    const auto& p = e.srpa[i];
+                    if (!p.is_valid()) continue;
+                    auto it = mod_map.find(p.impl()->address);
+                    if (it == mod_map.end()) continue;
+                    cc.store_input_element(e.name, niobium::CapturedKind::SRPArray,
+                                           /*starts_new_element=*/true,
+                                           p.impl()->address, it->second,
+                                           data_or_zeros(p));
+                }
             }
             break;
         }
     }
 
     // ---- Outputs ----
-    auto try_push_output = [&](const std::string& name, const Polynomial& p) {
-        if (!p.is_valid()) return;
+    // Outputs without a known modulus still get recorded (modulus=0) so
+    // downstream consumers can at least emit a template.
+    auto modulus_for = [&](const Polynomial& p) -> uint64_t {
         auto it = mod_map.find(p.impl()->address);
-        uint64_t q = (it == mod_map.end()) ? 0 : it->second;
-        cc.store_output_probe(name, p.impl()->address, q);
+        return (it == mod_map.end()) ? 0 : it->second;
     };
 
     for (const auto& e : probe_registry()) {
         switch (e.kind) {
         case ProbeEntry::POLY:
-            try_push_output(e.name, e.poly);
+            if (e.poly.is_valid()) {
+                cc.store_output_probe(e.name, niobium::CapturedKind::SRP,
+                                        /*starts_new_element=*/false,
+                                        e.poly.impl()->address, modulus_for(e.poly));
+            }
             break;
         case ProbeEntry::MRP_KIND:
             if (e.mrp.is_valid()) {
-                for (auto q : e.mrp.base())
-                    cc.store_output_probe(e.name, e.mrp[q].impl()->address, q);
+                for (auto q : e.mrp.base()) {
+                    cc.store_output_probe(e.name, niobium::CapturedKind::MRP,
+                                            /*starts_new_element=*/false,
+                                            e.mrp[q].impl()->address, q);
+                }
             }
             break;
         case ProbeEntry::MRPA:
             if (e.mrpa.is_valid()) {
                 for (size_t i = 0; i < e.mrpa.length(); ++i) {
                     const auto& m = e.mrpa[i];
-                    for (auto q : m.base())
-                        cc.store_output_probe(e.name, m[q].impl()->address, q);
+                    bool first = true;
+                    for (auto q : m.base()) {
+                        cc.store_output_probe(e.name, niobium::CapturedKind::MRPArray,
+                                                /*starts_new_element=*/first,
+                                                m[q].impl()->address, q);
+                        first = false;
+                    }
                 }
             }
             break;
         case ProbeEntry::SRPA:
             if (e.srpa.is_valid()) {
-                for (size_t i = 0; i < e.srpa.length(); ++i)
-                    try_push_output(e.name, e.srpa[i]);
+                for (size_t i = 0; i < e.srpa.length(); ++i) {
+                    const auto& p = e.srpa[i];
+                    if (!p.is_valid()) continue;
+                    cc.store_output_probe(e.name, niobium::CapturedKind::SRPArray,
+                                            /*starts_new_element=*/true,
+                                            p.impl()->address, modulus_for(p));
+                }
             }
             break;
         }

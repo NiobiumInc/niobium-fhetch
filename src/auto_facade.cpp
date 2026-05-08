@@ -303,7 +303,7 @@ static void capture_ciphertext_polys(niobium::Compiler& compiler,
             for (size_t i = 0; i < n; ++i)
                 vals[i] = vec[i].ConvertToInt();
 
-            compiler.store_input_element(name, fhetch_addr, modulus, vals);
+            compiler.store_input_element(name, niobium::CapturedKind::SRP, /*starts_new_element=*/false, fhetch_addr, modulus, vals);
         }
     }
 }
@@ -350,7 +350,8 @@ void Compiler::probe<lbcrypto::Ciphertext<DCRTPoly>>(
             uint64_t fhetch_addr = detail::lookup_fhetch_address(poly_id);
             if (fhetch_addr == static_cast<uint64_t>(-1)) continue;
             uint64_t modulus = poly.GetModulus().ConvertToInt();
-            store_output_probe(var_name, fhetch_addr, modulus);
+            store_output_probe(var_name, niobium::CapturedKind::SRP,
+                               /*starts_new_element=*/false, fhetch_addr, modulus);
         }
     }
 
@@ -438,7 +439,7 @@ static size_t capture_dcrt_polys(Compiler& compiler,
                           << std::endl;
             }
 
-            compiler.store_input_element(key_name, fhetch_addr, modulus, vals);
+            compiler.store_input_element(key_name, niobium::CapturedKind::SRP, /*starts_new_element=*/false, fhetch_addr, modulus, vals);
             count++;
         }
     }
@@ -503,7 +504,9 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
         }
         if (!any_nonzero) ++zero_count;
 
-        niobium::compiler().store_input_element(name, fhetch_addr, modulus, vals);
+        niobium::compiler().store_input_element(
+            name, niobium::CapturedKind::SRP, /*starts_new_element=*/false, fhetch_addr, modulus,
+            vals);
     }
 
     std::cout << "[NIOBIUM] captured " << name << ": " << towers.size()
@@ -661,8 +664,8 @@ void Compiler::tag_bootstrap_precompute<lbcrypto::CryptoContext<DCRTPoly>>(
             const auto& vec = poly.GetValues();
             for (size_t i = 0; i < n; ++i)
                 vals[i] = vec[i].ConvertToInt();
-            this->store_input_element("bootstrap_precompute", fhetch_addr,
-                                      modulus, vals);
+            this->store_input_element("bootstrap_precompute", niobium::CapturedKind::SRP,
+                                      /*starts_new_element=*/false, fhetch_addr, modulus, vals);
         }
     };
 
@@ -779,7 +782,7 @@ static size_t extract_all_polys_from_dcrt(niobium::Compiler& compiler,
             for (size_t i = 0; i < n; ++i)
                 vals[i] = vec[i].ConvertToInt();
 
-            compiler.store_input_element(name, fhetch_addr, modulus, vals);
+            compiler.store_input_element(name, niobium::CapturedKind::SRP, /*starts_new_element=*/false, fhetch_addr, modulus, vals);
             count++;
         }
     }

@@ -38,14 +38,37 @@
 
 namespace niobium {
 
+/// Shape of the value passed to tag_input / tag_output. Mirrors the
+/// four overloads in fhetch_api.h.
+enum class CapturedKind : uint8_t { SRP, MRP, SRPArray, MRPArray };
+
+/// Per-record shape returned by the for_each_captured_* helpers in
+/// compiler_internal.h. per_element_moduli has size 1 for SRP / MRP
+/// (the element's moduli list) and size K for SRPArray / MRPArray
+/// (one list per array position).
+struct CapturedShape {
+    CapturedKind kind;
+    std::vector<std::vector<uint64_t>> per_element_moduli;
+};
+
+/// Per-record snapshot of a captured input. One record per distinct
+/// tag_input name, with shape + per-residue values + addr_ids in
+/// encounter order.
+struct CapturedInputRecord {
+    std::string name;
+    CapturedShape shape;
+    std::vector<uint64_t> addr_ids;
+    std::vector<std::vector<uint64_t>> per_residue_values;
+};
+
 class Compiler {
-public:
+  public:
     Compiler();
     ~Compiler();
 
     // Non-copyable, non-movable (singleton)
-    Compiler(const Compiler&) = delete;
-    Compiler& operator=(const Compiler&) = delete;
+    Compiler(const Compiler &) = delete;
+    Compiler &operator=(const Compiler &) = delete;
 
     // ====================================================================
     // SESSION LIFECYCLE
@@ -53,7 +76,7 @@ public:
 
     /// Initialize compiler with command-line arguments.
     /// Parses and consumes Niobium-specific flags from argv.
-    void init(int& argc, char** argv);
+    void init(int &argc, char **argv);
 
     /// Begin instruction recording.
     /// Must be called before performing any FHE operations to record.
@@ -77,16 +100,14 @@ public:
     // ====================================================================
 
     /// Set program information for debugging and identification.
-    void set_program_info(const std::string& name,
-                          const std::string& version,
-                          const std::string& description);
+    void set_program_info(const std::string &name, const std::string &version,
+                          const std::string &description);
 
     /// Set build information for traceability.
     /// @param file      Source file path (use __FILE__).
     /// @param line      Source line number (use __LINE__).
     /// @param timestamp Build timestamp (use __TIMESTAMP__).
-    void set_build_info(const std::string& file, int line,
-                        const std::string& timestamp);
+    void set_build_info(const std::string &file, int line, const std::string &timestamp);
 
     // ====================================================================
     // CACHE MANAGEMENT
@@ -97,7 +118,7 @@ public:
 
     /// Set cache parameters for instruction trace validation.
     /// Cache parameters uniquely identify the computation configuration.
-    void cache_parameters(CacheParameters& params);
+    void cache_parameters(CacheParameters &params);
 
     /// Check if the cached instruction trace is valid for reuse.
     /// @return true if cache is valid (skip recording), false if recording needed.
@@ -114,27 +135,23 @@ public:
     /// @param input_name  Unique name for the input.
     /// @param value       OpenFHE Ciphertext or Plaintext to tag.
     /// @param file        Optional file path for data loading during replay.
-    template<typename T>
-    void tag_input(const std::string& input_name,
-                   const T& value,
+    template <typename T>
+    void tag_input(const std::string &input_name, const T &value,
                    std::optional<std::filesystem::path> file = std::nullopt);
 
     /// Tag an input (non-const overload, for in-place ID capture).
-    template<typename T>
-    void tag_input(const std::string& input_name,
-                   T& value,
+    template <typename T>
+    void tag_input(const std::string &input_name, T &value,
                    std::optional<std::filesystem::path> file = std::nullopt);
 
     /// Tag an output ciphertext/plaintext for recording.
     /// Call for all computation outputs before stop().
     /// @param var_name     Unique name for the output variable.
     /// @param value        OpenFHE Ciphertext or Plaintext to tag as output.
-    template<typename T>
-    void probe(const std::string& var_name, const T& value);
+    template <typename T> void probe(const std::string &var_name, const T &value);
 
     /// Tag a vector of output ciphertexts for recording.
-    template<typename T>
-    void probe(const std::string& var_name, const std::vector<T>& values);
+    template <typename T> void probe(const std::string &var_name, const std::vector<T> &values);
 
     // ====================================================================
     // CRYPTO CONTEXT
@@ -143,8 +160,7 @@ public:
     /// Capture the cryptographic context for serialization.
     /// Must be called after all keys are loaded and before recording starts.
     /// @param cc  OpenFHE CryptoContext (lbcrypto::CryptoContext<DCRTPoly>).
-    template<typename CryptoContextType>
-    void capture_crypto_context(const CryptoContextType& cc);
+    template <typename CryptoContextType> void capture_crypto_context(const CryptoContextType &cc);
 
     /// Set the ring dimension for the FHETCH simulator.
     /// Called automatically by capture_crypto_context(), or can be set manually.
@@ -152,14 +168,12 @@ public:
 
     /// Set crypto context metadata for replay.json.
     /// Called by capture_crypto_context template instantiation.
-    void set_crypto_context_info(const std::string& scheme_name,
-                                 uint32_t multiplicative_depth,
-                                 uint32_t scaling_mod_size,
-                                 const std::string& security_level,
-                                 const std::vector<uint64_t>& modulus_chain);
+    void set_crypto_context_info(const std::string &scheme_name, uint32_t multiplicative_depth,
+                                 uint32_t scaling_mod_size, const std::string &security_level,
+                                 const std::vector<uint64_t> &modulus_chain);
 
     /// Set key start addr_id for a given key type.
-    void set_key_start_addr_id(const std::string& key_type, uint64_t addr_id);
+    void set_key_start_addr_id(const std::string &key_type, uint64_t addr_id);
 
     /// Advance the FHETCH address allocator to at least `next_addr` so the
     /// next call to tag_keys/tag_input places polynomials starting there.
@@ -172,14 +186,13 @@ public:
     /// CryptoContext and extracts their polynomial coefficients.
     /// Call after deserializing keys and before start().
     /// @param cc  OpenFHE CryptoContext containing the loaded keys.
-    template<typename CryptoContextType>
-    void tag_keys(const CryptoContextType& cc);
+    template <typename CryptoContextType> void tag_keys(const CryptoContextType &cc);
 
     /// Internal: capture CKKS bootstrap precomputation plaintexts. Invoked
     /// automatically from stop() via the hook registered by
     /// capture_crypto_context(); not meant to be called by user code.
-    template<typename CryptoContextType>
-    void tag_bootstrap_precompute(const CryptoContextType& cc);
+    template <typename CryptoContextType>
+    void tag_bootstrap_precompute(const CryptoContextType &cc);
 
     // ====================================================================
     // RECORDING MODES
@@ -227,9 +240,8 @@ public:
     /// @param var_name Name of the output (as passed to probe()).
     /// @param result   Ciphertext to populate with computed values.
     /// @return true if the result was retrieved successfully.
-    template<typename CryptoContextType, typename CiphertextType>
-    bool result(CryptoContextType& cc, const std::string& var_name,
-                CiphertextType& result);
+    template <typename CryptoContextType, typename CiphertextType>
+    bool result(CryptoContextType &cc, const std::string &var_name, CiphertextType &result);
 
     /// Reconstruct probe ciphertexts from simulator output.
     void reconstruct_probes() const;
@@ -278,8 +290,7 @@ public:
     // ====================================================================
 
     /// Run a lambda with automatic start/stop bracketing.
-    template<typename Lambda, typename... Args>
-    void run(Lambda&& work, Args&&... args) {
+    template <typename Lambda, typename... Args> void run(Lambda &&work, Args &&...args) {
         start();
         std::forward<Lambda>(work)(std::forward<Args>(args)...);
         stop();
@@ -310,18 +321,19 @@ public:
     /// hollow_mode, multithreaded, or target.
     void reset();
 
-    // Internal: store captured input polynomial data for replay.
-    // Called by the tag_input template instantiation.
-    void store_input_element(const std::string& input_name,
-                             uint64_t addr_id, uint64_t modulus,
-                             const std::vector<uint64_t>& values);
+    // Append a residue to a captured input record. Sets `kind` on the
+    // record's first call; later calls must match the existing kind.
+    // `starts_new_element` marks an SRPArray / MRPArray element boundary.
+    void store_input_element(const std::string &input_name, CapturedKind kind,
+                             bool starts_new_element, uint64_t addr_id, uint64_t modulus,
+                             const std::vector<uint64_t> &values);
 
-    // Internal: store output probe address for replay.
-    // Called by the probe template instantiation.
-    void store_output_probe(const std::string& output_name,
-                            uint64_t addr_id, uint64_t modulus);
+    // Append a residue to a captured output probe. Same semantics as
+    // store_input_element above.
+    void store_output_probe(const std::string &output_name, CapturedKind kind,
+                            bool starts_new_element, uint64_t addr_id, uint64_t modulus);
 
-private:
+  private:
     void write_replay_json();
     void write_replay_outputs();
 
@@ -334,10 +346,10 @@ private:
     std::unique_ptr<Impl> impl_;
 
     // Internal library access (fhetch_api.cpp, probes.cpp).
-    friend Impl& compiler_impl(Compiler& c);
+    friend Impl &compiler_impl(Compiler &c);
 };
 
 /// Get the global Compiler singleton instance.
-Compiler& compiler();
+Compiler &compiler();
 
-}  // namespace niobium
+} // namespace niobium

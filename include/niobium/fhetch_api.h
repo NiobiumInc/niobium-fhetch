@@ -142,6 +142,10 @@ public:
     bool is_valid() const;
     explicit operator bool() const { return is_valid(); }
 
+    /// Integer-component values. Throws std::runtime_error if the
+    /// polynomial is non-integer or invalid. Length == ring_dimension().
+    const std::vector<uint64_t>& int_data() const;
+
     /// Access the internal implementation (for Niobium internals only).
     PolynomialImpl* impl() const;
 
