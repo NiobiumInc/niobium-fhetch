@@ -124,6 +124,15 @@ public:
                                 uint64_t ring_dim,
                                 Format fmt = Format::Evaluation);
 
+    /// Construct an integer polynomial by taking ownership of the caller's
+    /// component buffer. The buffer is moved into the polynomial's internal
+    /// storage; no copy is performed. Caller must ensure
+    /// `components.size() == ring_dim`; the constructor does not validate
+    /// (matches the const-ref overload's pre-existing behavior).
+    static Polynomial from_data(std::vector<uint64_t>&& components,
+                                uint64_t ring_dim,
+                                Format fmt = Format::Evaluation);
+
     /// Construct a non-integer polynomial from raw component data.
     static Polynomial from_data_ni(const std::vector<double>& components,
                                    uint64_t ring_dim,

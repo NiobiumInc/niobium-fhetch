@@ -212,6 +212,13 @@ Polynomial Polynomial::from_data(const std::vector<uint64_t>& components,
     return Polynomial(p);
 }
 
+Polynomial Polynomial::from_data(std::vector<uint64_t>&& components,
+                                 uint64_t ring_dim, Format fmt) {
+    auto p = std::make_shared<PolynomialImpl>(ring_dim, fmt, NumberType::Integer);
+    p->int_data = std::move(components);
+    return Polynomial(p);
+}
+
 Polynomial Polynomial::from_data_ni(const std::vector<double>& components,
                                     uint64_t ring_dim, Format fmt) {
     auto p = std::make_shared<PolynomialImpl>(ring_dim, fmt, NumberType::NonInteger);
