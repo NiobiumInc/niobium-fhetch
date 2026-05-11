@@ -306,7 +306,27 @@ test-roundtrip-bootstrap-release: build-release ## Full roundtrip for bootstrap 
 	@echo "=== Bootstrap secondary decrypt ==="
 	$(BUILD_DIR)/tests/bootstrap_decrypt bootstrap_keys ct_result_secondary.bin
 
-test-roundtrip-release: test-roundtrip-simple-ops-release test-roundtrip-bootstrap-release ## Full roundtrip sweep: simple_ops + bootstrap
+test-roundtrip-plaintext-add-release: build-release ## Full roundtrip for plaintext-add (primary + secondary decrypt)
+	$(call set-build-config,Release,build)
+	@rm -rf plaintext_add_keys plaintext_add_server_*
+	@echo "=== Plaintext-Add client ==="
+	$(BUILD_DIR)/tests/plaintext_add_client plaintext_add_keys
+	@echo "=== Plaintext-Add server ==="
+	$(BUILD_DIR)/tests/plaintext_add_server plaintext_add_keys
+	@echo "=== Plaintext-Add primary decrypt ==="
+	$(BUILD_DIR)/tests/plaintext_add_decrypt plaintext_add_keys ct_result.bin
+	@echo "=== Plaintext-Add fhetch_driver (secondary) ==="
+	@WORKLOAD_DIR=$$(ls -d plaintext_add_server_workload_* 2>/dev/null); \
+	 N=$$($(BUILD_DIR)/tests/plaintext_add_server plaintext_add_keys 2>&1 | grep -oP 'Ring dimension:\s*\K[0-9]+' | head -1); \
+	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $${N:-2048} \
+	     --source-dir $$WORKLOAD_DIR \
+	     --cc plaintext_add_keys/cc.bin \
+	     --output-ct output_cipher:plaintext_add_keys/ct_result_secondary.bin
+	@echo "=== Plaintext-Add secondary decrypt ==="
+	$(BUILD_DIR)/tests/plaintext_add_decrypt plaintext_add_keys ct_result_secondary.bin
+
+test-roundtrip-release: test-roundtrip-simple-ops-release test-roundtrip-bootstrap-release test-roundtrip-plaintext-add-release ## Full roundtrip sweep: simple_ops + bootstrap + plaintext-add
 
 # ==============================================================================
 # test-release — everything that currently passes
