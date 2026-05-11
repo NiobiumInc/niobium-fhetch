@@ -1083,6 +1083,10 @@ void Compiler::write_replay_outputs() {
     auto dir = get_program_directory();
     auto path = dir / "fhetch_replay_outputs.json";
 
+    // Ops without a modulus operand (sr_automorph_eval, sr_ft, ...) record
+    // modulus=0 in mod_map; emit COPY_MODULUS so the reader falls back to
+    // the template's tower modulus instead of trying to build params with 0.
+    constexpr uint64_t COPY_MODULUS = 0xFFFFFFFFFFFFFFFFULL;
     json root;
     json outputs_arr = json::array();
     for (const auto& output : impl_->captured_outputs) {
@@ -1094,7 +1098,7 @@ void Compiler::write_replay_outputs() {
             auto values = impl_->simulator->get_polynomial(addr);
             json elem;
             elem["addr_id"] = addr;
-            elem["modulus"] = output.moduli[j];
+            elem["modulus"] = (output.moduli[j] == 0) ? COPY_MODULUS : output.moduli[j];
             elem["status"] = values.empty() ? "missing" : "computed";
             elem["values"] = values;
             elems_arr.push_back(elem);
