@@ -22,6 +22,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cstdint>
 #include <exception>
+#include <stdexcept>
 #include <cstddef>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
@@ -843,6 +844,44 @@ void niobium::Compiler::refresh_all_inputs() {
 // reconstruct_probes() — fill ciphertext templates with simulator output
 // ============================================================================
 
+// One per-tower entry parsed out of fhetch_replay_outputs.json. The trace's
+// modulus and the integer-form values are the only fields apply_sim_output
+// needs; surfacing the schema here lets the fill loop work in typed land.
+struct ComputedElement {
+    uint64_t modulus;
+    std::vector<uint64_t> values;
+};
+
+// Overwrite native_poly with the simulator's values under the trace's
+// modulus, replacing the template's OpenFHE-picked prime. Throws on
+// values.size() != ring_dim.
+//
+// COPY_MODULUS handling: simulator stores 0xFFFFFFFFFFFFFFFF as a sentinel
+// for instructions whose .fhetch form carries no modulus operand (notably
+// sr_automorph_eval / morph2). It's not a real prime and would trip
+// RootOfUnity, so when we see it we keep the template's tower modulus.
+// Automorphism preserves values without modular reduction, so the residues
+// remain valid mod the template prime.
+static void apply_sim_output(lbcrypto::NativePoly& native_poly, const ComputedElement& ce) {
+    constexpr uint64_t COPY_MODULUS = 0xFFFFFFFFFFFFFFFFULL;
+    size_t ring_dim = native_poly.GetLength();
+    if (ce.values.size() != ring_dim) {
+        throw std::runtime_error("apply_sim_output: values.size()=" +
+                                  std::to_string(ce.values.size()) +
+                                  " != ring_dim=" + std::to_string(ring_dim));
+    }
+    lbcrypto::NativeInteger mod = (ce.modulus == COPY_MODULUS)
+                                      ? native_poly.GetModulus()
+                                      : lbcrypto::NativeInteger(ce.modulus);
+    auto fmt = native_poly.GetFormat();
+    auto params = std::make_shared<lbcrypto::ILNativeParams>(2 * ring_dim, mod);
+    native_poly = lbcrypto::NativePoly(params, fmt, /*initializeElementToZero=*/true);
+    lbcrypto::NativeVector nv(ring_dim, mod);
+    for (size_t i = 0; i < ring_dim; ++i)
+        nv[i] = lbcrypto::NativeInteger(ce.values[i]);
+    native_poly.SetValues(std::move(nv), fmt);
+}
+
 void Compiler::reconstruct_probes() const {
     // Re-entry guard. The Serial::{De,}SerializeFromFile calls below fire
     // the auto-facade's on_{de,}serialize_ciphertext hooks, which in turn
@@ -877,31 +916,29 @@ void Compiler::reconstruct_probes() const {
             continue;
         }
 
-        // Fill the polynomial values from the simulator output
-        const auto& sim_elements = output_entry["elements"];
-        auto& ct_elements = ct->GetElements();
-        size_t elem_idx = 0;
-        for (auto& dcrt : ct_elements) {
-            auto& polys = dcrt.GetAllElements();
-            for (auto& native_poly : polys) {
-                if (elem_idx >= sim_elements.size()) break;
-                const auto& sim_elem = sim_elements[elem_idx];
-                if (sim_elem.value("status", "") == "computed" && sim_elem.contains("values")) {
-                    auto values = sim_elem["values"].get<std::vector<uint64_t>>();
-                    size_t ring_dim = native_poly.GetLength();
-                    auto modulus = native_poly.GetModulus();
-                    lbcrypto::NativeVector nv(ring_dim, modulus);
-                    for (size_t i = 0; i < ring_dim && i < values.size(); i++)
-                        nv[i] = lbcrypto::NativeInteger(values[i]);
-                    native_poly.SetValues(std::move(nv), native_poly.GetFormat());
+        // Walk the template's NativePolys in lockstep with sim_elements;
+        // apply each computed entry, leave gaps untouched.
+        try {
+            const auto& sim_elements = output_entry["elements"];
+            size_t elem_idx = 0;
+            for (auto& dcrt : ct->GetElements()) {
+                for (auto& native_poly : dcrt.GetAllElements()) {
+                    if (elem_idx >= sim_elements.size()) break;
+                    const auto& sim_elem = sim_elements[elem_idx++];
+                    if (sim_elem.value("status", "") != "computed" || !sim_elem.contains("values"))
+                        continue;
+                    ComputedElement ce{sim_elem.at("modulus").get<uint64_t>(),
+                                       sim_elem["values"].get<std::vector<uint64_t>>()};
+                    apply_sim_output(native_poly, ce);
                 }
-                elem_idx++;
             }
-        }
-
-        auto ct_path = serialized_dir / (name + ".ct");
-        if (lbcrypto::Serial::SerializeToFile(ct_path.string(), ct, lbcrypto::SerType::BINARY)) {
-            std::cout << "[NIOBIUM] Serialized probe '" << name << "' to " << ct_path << std::endl;
+            auto ct_path = serialized_dir / (name + ".ct");
+            if (lbcrypto::Serial::SerializeToFile(ct_path.string(), ct, lbcrypto::SerType::BINARY)) {
+                std::cout << "[NIOBIUM] Serialized probe '" << name << "' to " << ct_path << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[NIOBIUM] Failed to fill template for '" << name << "': "
+                      << e.what() << std::endl;
         }
     }
 }
