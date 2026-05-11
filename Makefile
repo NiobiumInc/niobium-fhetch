@@ -339,7 +339,8 @@ test-roundtrip-release: test-roundtrip-simple-ops-release test-roundtrip-bootstr
 test-release: \
     test-simple-fhetch-release \
     test-fhetch-driver-release \
-    test-roundtrip-simple-ops-release  ## Run all currently-passing Release tests
+    test-roundtrip-simple-ops-release \
+    test-roundtrip-plaintext-add-release  ## Run all currently-passing Release tests
 
 ##@ Installation
 
