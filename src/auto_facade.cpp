@@ -932,6 +932,16 @@ struct ComputedElement {
     std::vector<uint64_t> values;
 };
 
+// Convert one JSON sim element into a typed ComputedElement, or nullopt for
+// non-computed / values-less entries. Throws on missing "modulus" — old
+// traces that predate the trace-modulus contract must be regenerated.
+static std::optional<ComputedElement> parse_sim_element(const nlohmann::json& sim_elem) {
+    if (sim_elem.value("status", "") != "computed" || !sim_elem.contains("values"))
+        return std::nullopt;
+    return ComputedElement{sim_elem.at("modulus").get<uint64_t>(),
+                           sim_elem["values"].get<std::vector<uint64_t>>()};
+}
+
 // Overwrite native_poly with the simulator's values under the trace's
 // modulus, replacing the template's OpenFHE-picked prime. Throws on
 // values.size() != ring_dim.
@@ -1004,12 +1014,8 @@ void Compiler::reconstruct_probes() const {
             for (auto& dcrt : ct->GetElements()) {
                 for (auto& native_poly : dcrt.GetAllElements()) {
                     if (elem_idx >= sim_elements.size()) break;
-                    const auto& sim_elem = sim_elements[elem_idx++];
-                    if (sim_elem.value("status", "") != "computed" || !sim_elem.contains("values"))
-                        continue;
-                    ComputedElement ce{sim_elem.at("modulus").get<uint64_t>(),
-                                       sim_elem["values"].get<std::vector<uint64_t>>()};
-                    apply_sim_output(native_poly, ce);
+                    if (auto ce = parse_sim_element(sim_elements[elem_idx++]))
+                        apply_sim_output(native_poly, *ce);
                 }
             }
             auto ct_path = serialized_dir / (name + ".ct");
