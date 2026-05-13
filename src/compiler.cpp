@@ -381,7 +381,13 @@ void Compiler::set_post_recording_hook(std::function<void()> fn) {
     impl_->post_recording_hook = std::move(fn);
 }
 
+namespace detail {
+// Defined in fhetch_api.cpp; clears TU-static recording state.
+void clear_recording_registries() noexcept;
+}  // namespace detail
+
 void Compiler::reset() {
+    detail::clear_recording_registries();
     impl_->captured_inputs.clear();
     impl_->captured_input_index.clear();
     impl_->captured_outputs.clear();
