@@ -1338,6 +1338,12 @@ uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p) {
     return p.impl() ? p.impl()->address : static_cast<uintptr_t>(-1);
 }
 
+// Drops TU-static recording state Compiler::reset can't reach; first-write-wins
+// on address_modulus_map otherwise leaks moduli across resets.
+void clear_recording_registries() noexcept {
+    niobium::fhetch::address_modulus_map().clear();
+}
+
 void sync_fhetch_state_to_compiler() {
     using namespace niobium::fhetch;
     auto& cc = niobium::compiler();
