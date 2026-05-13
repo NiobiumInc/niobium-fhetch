@@ -457,6 +457,9 @@ void reset_for_epoch() {
     next_address_.store(0, std::memory_order_relaxed);
     input_registry().clear();
     probe_registry().clear();
+    // next_address_ rolls back to 0, so the prior epoch's entries would
+    // shadow this epoch's first-write-wins inserts.
+    address_modulus_map().clear();
 }
 
 // ============================================================================
