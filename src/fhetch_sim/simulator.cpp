@@ -580,6 +580,21 @@ std::vector<uint64_t> Simulator::get_read_before_write_addresses() const {
             inst.opcode == OpCode::UNKNOWN)
             continue;
 
+        // Stubs: execute() dispatches these to `ok = true` without calling
+        // memory.set(), so they neither read src nor write dest. Treat them
+        // as no-ops here so callers don't mistake dest as a write.
+        switch (inst.opcode) {
+        case OpCode::SR_PERMUTE:
+        case OpCode::SR_AUTOMORPH_COEFF:
+        case OpCode::SR_NEGP_NI:
+        case OpCode::SR_FT: case OpCode::SR_IFT:
+        case OpCode::SR_ADDP_NI: case OpCode::SR_SUBP_NI: case OpCode::SR_MULP_NI:
+        case OpCode::SR_ADDPS_NI: case OpCode::SR_SUBPS_NI: case OpCode::SR_MULPS_NI:
+        case OpCode::SR_ADDPS_COEFF_NI: case OpCode::SR_SUBPS_COEFF_NI:
+            continue;
+        default: break;
+        }
+
         // Source addresses are read
         // For poly-poly ops: src1 and src2 are sources
         // For poly-scalar/unary ops: src1 is the source
