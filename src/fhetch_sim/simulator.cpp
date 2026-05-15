@@ -20,6 +20,7 @@
 #include <iterator>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <utility>
@@ -54,6 +55,77 @@ struct Simulator::Impl {
     // Addresses we've already warned about once — keeps uninit-read
     // warnings readable when the same address is consumed by many ops.
     std::unordered_set<uint64_t> warned_uninit_addrs;
+
+    // Per-instruction schedule of addresses to free after that instruction
+    // executes. Built by compute_liveness(); empty by default (no freeing).
+    std::vector<std::vector<uint64_t>> free_after_;
+
+    // Addresses that must never be freed (probe outputs, etc.).
+    std::unordered_set<uint64_t> live_out_;
+
+    // What addresses an instruction reads and writes. The liveness
+    // pass uses this to find each address's last read. FHETCH
+    // instructions have at most two source operands (src1, src2), so
+    // `reads` is a fixed two-slot array; `n_reads` tells the caller
+    // how many of those slots are populated.
+    struct InstUses {
+        uint64_t write;     // dest address; meaningful iff writes==true
+        bool writes;        // true if this instruction writes to mem_
+        uint64_t reads[2];  // source addresses; only first n_reads valid
+        int n_reads;        // 0, 1, or 2
+    };
+
+    // Decode `inst` into the addresses it reads and writes.
+    static InstUses classify_uses(const Instruction& inst) {
+        const uint64_t d = inst.dest;
+        const uint64_t a = inst.src1;
+        const uint64_t b = inst.src2;
+        switch (inst.opcode) {
+        // No-ops: comments, unknowns, halt, and unimplemented stubs
+        // (execute() runs these as bare `ok = true`, no memory.set, so
+        // for liveness they neither read nor write).
+        case OpCode::COMMENT:
+        case OpCode::UNKNOWN:
+        case OpCode::HALT:
+        case OpCode::SR_PERMUTE:
+        case OpCode::SR_AUTOMORPH_COEFF:
+        case OpCode::SR_NEGP_NI:
+        case OpCode::SR_FT:
+        case OpCode::SR_IFT:
+        case OpCode::SR_ADDP_NI:
+        case OpCode::SR_SUBP_NI:
+        case OpCode::SR_MULP_NI:
+        case OpCode::SR_ADDPS_NI:
+        case OpCode::SR_SUBPS_NI:
+        case OpCode::SR_MULPS_NI:
+        case OpCode::SR_ADDPS_COEFF_NI:
+        case OpCode::SR_SUBPS_COEFF_NI:
+            return {.write = 0, .writes = false, .reads = {0, 0}, .n_reads = 0};
+
+        // sr_mulps with imm=0 writes a zero vector and reads nothing
+        // (see exec_mulps); the other immediate-form ops read src1.
+        case OpCode::SR_MULPS:
+            return inst.immediate == 0
+                ? InstUses{.write = d, .writes = true, .reads = {0, 0}, .n_reads = 0}
+                : InstUses{.write = d, .writes = true, .reads = {a, 0}, .n_reads = 1};
+
+        // One-source ops: write dest, read src1.
+        case OpCode::SR_NEGP:
+        case OpCode::SR_NTT:
+        case OpCode::SR_INTT:
+        case OpCode::SR_AUTOMORPH_EVAL:
+        case OpCode::SR_ROT_AUTOMORPH_COEFF:
+        case OpCode::SR_ADDPS:
+        case OpCode::SR_SUBPS:
+        case OpCode::SR_ADDPS_COEFF:
+        case OpCode::SR_SUBPS_COEFF:
+            return {.write = d, .writes = true, .reads = {a, 0}, .n_reads = 1};
+
+        // Two-source arithmetic (sr_addp / sr_subp / sr_mulp).
+        default:
+            return {.write = d, .writes = true, .reads = {a, b}, .n_reads = 2};
+        }
+    }
 
     // Get polynomial from memory, returning zero-initialized if missing
     const std::vector<uint64_t>& get_or_zero(uint64_t addr,
@@ -96,10 +168,10 @@ struct Simulator::Impl {
             vb[i] = NativeInteger(b[i]);
         }
         NativeVector vr = va.ModAdd(vb);
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++)
             result[i] = vr[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -121,10 +193,10 @@ struct Simulator::Impl {
             vb[i] = NativeInteger(b[i]);
         }
         NativeVector vr = va.ModSub(vb);
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++)
             result[i] = vr[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -146,10 +218,10 @@ struct Simulator::Impl {
             vb[i] = NativeInteger(b[i]);
         }
         NativeVector vr = va.ModMul(vb);
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++)
             result[i] = vr[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -162,7 +234,13 @@ struct Simulator::Impl {
         // Special case: immediate 0 = copy (no modular reduction).
         // Used by copy probes where the modulus may not match the data.
         if (inst.immediate == 0) {
-            memory.set(inst.dest, std::vector<uint64_t>(a), q);
+            auto& out = memory.reserve_dest(inst.dest);
+            // When dest == src1, `&out == &a` and the copy is a no-op
+            // — skip to keep std::copy well-defined.
+            if (&out != &a) {
+                std::copy(a.begin(), a.end(), out.begin());
+            }
+            memory.commit_dest(inst.dest, q);
             return true;
         }
 
@@ -171,9 +249,9 @@ struct Simulator::Impl {
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModAddEq(imm);
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++) result[i] = va[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -188,9 +266,9 @@ struct Simulator::Impl {
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModSubEq(imm);
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++) result[i] = va[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -199,7 +277,9 @@ struct Simulator::Impl {
 
         // Special case: multiply by 0 always produces zero
         if (inst.immediate == 0) {
-            memory.set(inst.dest, std::vector<uint64_t>(ring_dim, 0), q);
+            auto& out = memory.reserve_dest(inst.dest);
+            std::fill(out.begin(), out.end(), 0);
+            memory.commit_dest(inst.dest, q);
             return true;
         }
 
@@ -212,9 +292,9 @@ struct Simulator::Impl {
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModMulEq(imm);
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++) result[i] = va[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -224,10 +304,10 @@ struct Simulator::Impl {
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
 
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++)
             result[i] = (a[i] == 0) ? 0 : q - a[i];
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -251,9 +331,9 @@ struct Simulator::Impl {
         ChineseRemainderTransformFTT<NativeVector> transformer;
         transformer.ForwardTransformToBitReverse(va, root, 2 * ring_dim, &va);
 
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++) result[i] = va[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -284,14 +364,21 @@ struct Simulator::Impl {
             return r;
         };
 
-        std::vector<uint64_t> result(ring_dim, 0);
+        // Snapshot src: the permutation reads `a[idxrev]` and writes
+        // `result[jrev]` at different indices, so a dest==src1 trace
+        // would corrupt source positions mid-loop.
+        std::vector<uint64_t> snapshot(a.begin(), a.end());
+
+        // rev_bits is a bijection on [0, ring_dim), so every position
+        // of `result` is written exactly once — no zero-fill needed.
+        auto& result = memory.reserve_dest(inst.dest);
         uint32_t jk = k;
         for (uint32_t j = 0; j < ring_dim; ++j, jk += 2 * k) {
             uint32_t jrev = rev_bits(j, logn);
             uint32_t idxrev = rev_bits((jk >> 1) & mask, logn);
-            result[jrev] = a[idxrev];
+            result[jrev] = snapshot[idxrev];
         }
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -312,18 +399,22 @@ struct Simulator::Impl {
         }
         const uint64_t offset = inst.offset.value();
 
-        std::vector<uint64_t> result(ring_dim, 0);
+        // Snapshot src: the wraparound case reads from low indices
+        // that prior iterations have already written if dest=src1.
+        std::vector<uint64_t> snapshot(a.begin(), a.end());
+
+        auto& result = memory.reserve_dest(inst.dest);
         for (uint64_t i = 0; i < ring_dim; ++i) {
             const uint64_t src_pos = i + offset;
             if (src_pos < ring_dim) {
-                result[i] = a[src_pos];
+                result[i] = snapshot[src_pos];
             } else {
                 // (q - a[k]) % q yields 0 when a[k]==0 and (q - a[k]) when
                 // a[k] != 0, keeping result in [0, q).
-                result[i] = (q - a[src_pos - ring_dim]) % q;
+                result[i] = (q - snapshot[src_pos - ring_dim]) % q;
             }
         }
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -346,9 +437,9 @@ struct Simulator::Impl {
         ChineseRemainderTransformFTT<NativeVector> transformer;
         transformer.InverseTransformFromBitReverse(va, root, 2 * ring_dim, &va);
 
-        std::vector<uint64_t> result(ring_dim);
+        auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++) result[i] = va[i].ConvertToInt();
-        memory.set(inst.dest, std::move(result), q);
+        memory.commit_dest(inst.dest, q);
         return true;
     }
 
@@ -359,6 +450,7 @@ struct Simulator::Impl {
         size_t executed = 0;
         error_count = 0;
         size_t total = trace.instructions.size();
+        size_t peak_mem = memory.size();  // tracks max polys live at any point
 
         std::cout << "[FHETCH_SIM] Executing " << total << " instructions, "
                   << trace.modulus_table.size() << " moduli, N=" << ring_dim
@@ -442,6 +534,15 @@ struct Simulator::Impl {
                 }
             }
 
+            // Sample BEFORE the free hook so peak captures the working set
+            // at its largest, just after this instruction wrote its dest.
+            if (memory.size() > peak_mem) peak_mem = memory.size();
+
+            // Release addresses whose last use was this instruction.
+            if (i < free_after_.size()) {
+                for (uint64_t a : free_after_[i]) memory.erase(a);
+            }
+
             // Progress reporting every 2 seconds
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::seconds>(now - last_report).count() >= 2) {
@@ -460,6 +561,14 @@ struct Simulator::Impl {
                   << std::fixed << std::setprecision(2) << elapsed << "s"
                   << std::endl;
 
+        // Without freeing, peak == final size == total distinct addresses
+        // touched, so diffing the two runs gives the savings.
+        const double mib_per_poly = (ring_dim * sizeof(uint64_t)) / (1024.0 * 1024.0);
+        std::cout << "[FHETCH_SIM] Peak working set: " << peak_mem
+                  << " polys (~" << std::fixed << std::setprecision(2)
+                  << peak_mem * mib_per_poly << " MiB at N=" << ring_dim << ")"
+                  << ", final size: " << memory.size() << std::endl;
+
         return {executed, error_count, elapsed};
     }
 };
@@ -473,6 +582,7 @@ Simulator::~Simulator() = default;
 
 void Simulator::set_ring_dimension(uint64_t N) {
     impl_->ring_dim = N;
+    impl_->memory.set_ring_dim(N);
 }
 
 bool Simulator::load_trace(const std::filesystem::path& trace_file) {
@@ -574,74 +684,68 @@ void Simulator::prematerialize_zero_inits() {
 std::vector<uint64_t> Simulator::get_read_before_write_addresses() const {
     std::set<uint64_t> written;
     std::vector<uint64_t> rbw;
-
     for (const auto& inst : impl_->trace.instructions) {
-        if (inst.opcode == OpCode::HALT || inst.opcode == OpCode::COMMENT ||
-            inst.opcode == OpCode::UNKNOWN)
-            continue;
-
-        // Stubs: execute() dispatches these to `ok = true` without calling
-        // memory.set(), so they neither read src nor write dest. Treat them
-        // as no-ops here so callers don't mistake dest as a write.
-        switch (inst.opcode) {
-        case OpCode::SR_PERMUTE:
-        case OpCode::SR_AUTOMORPH_COEFF:
-        case OpCode::SR_NEGP_NI:
-        case OpCode::SR_FT: case OpCode::SR_IFT:
-        case OpCode::SR_ADDP_NI: case OpCode::SR_SUBP_NI: case OpCode::SR_MULP_NI:
-        case OpCode::SR_ADDPS_NI: case OpCode::SR_SUBPS_NI: case OpCode::SR_MULPS_NI:
-        case OpCode::SR_ADDPS_COEFF_NI: case OpCode::SR_SUBPS_COEFF_NI:
-            continue;
-        default: break;
+        auto u = Impl::classify_uses(inst);
+        for (int i = 0; i < u.n_reads; ++i) {
+            uint64_t a = u.reads[i];
+            if (!a) continue;
+            if (written.insert(a).second)
+                rbw.push_back(a);
         }
+        if (u.writes) written.insert(u.write);
+    }
+    return rbw;
+}
 
-        // Source addresses are read
-        // For poly-poly ops: src1 and src2 are sources
-        // For poly-scalar/unary ops: src1 is the source
-        // The dest is also a source for in-place ops (dest == src1)
-        uint64_t sources[2] = {inst.src1, inst.src2};
-        int nsrc = 2;
+void Simulator::set_live_out_addresses(const std::vector<uint64_t>& addrs) {
+    impl_->live_out_.clear();
+    impl_->live_out_.insert(addrs.begin(), addrs.end());
+}
 
-        // Unary ops only have src1
-        switch (inst.opcode) {
-        case OpCode::SR_NEGP:
-        case OpCode::SR_NTT: case OpCode::SR_INTT:
-        case OpCode::SR_NEGP_NI:
-        case OpCode::SR_FT: case OpCode::SR_IFT:
-        case OpCode::SR_PERMUTE:
-        case OpCode::SR_AUTOMORPH_EVAL:
-        case OpCode::SR_AUTOMORPH_COEFF:
-        case OpCode::SR_ROT_AUTOMORPH_COEFF:
-            nsrc = 1;
-            break;
-        case OpCode::SR_ADDPS: case OpCode::SR_SUBPS: case OpCode::SR_MULPS:
-        case OpCode::SR_ADDPS_COEFF: case OpCode::SR_SUBPS_COEFF:
-        case OpCode::SR_ADDPS_NI: case OpCode::SR_SUBPS_NI: case OpCode::SR_MULPS_NI:
-        case OpCode::SR_ADDPS_COEFF_NI: case OpCode::SR_SUBPS_COEFF_NI:
-            nsrc = 1;  // scalar ops: only src1 is a poly address
-            break;
-        default:
-            break;
-        }
-
-        // Special case: sr_mulps with imm=0 writes zero without reading source.
-        // Don't count the source as a read.
-        bool skip_read = (inst.opcode == OpCode::SR_MULPS && inst.immediate == 0);
-
-        for (int i = 0; i < nsrc && !skip_read; i++) {
-            if (written.find(sources[i]) == written.end()) {
-                // First time seeing this address as a source, and it hasn't
-                // been written yet — it's a read-before-write.
-                rbw.push_back(sources[i]);
-                written.insert(sources[i]);  // prevent duplicates in result
-            }
-        }
-
-        // Dest is written
-        written.insert(inst.dest);
+void Simulator::compute_liveness() {
+    // Opt-out for A/B comparison: leave free_after_ empty.
+    if (std::getenv("NIOBIUM_DISABLE_SIM_FREES")) {
+        impl_->free_after_.clear();
+        return;
     }
 
-    return rbw;
+    auto& insts = impl_->trace.instructions;
+
+    // Forward last-use scan: the final write to last_use[a] is a's
+    // last read. Live-out probes are excluded so they never get freed.
+    std::unordered_map<uint64_t, size_t> last_use;
+    for (size_t i = 0; i < insts.size(); ++i) {
+        auto u = Impl::classify_uses(insts[i]);
+        for (int j = 0; j < u.n_reads; ++j) {
+            uint64_t a = u.reads[j];
+            if (a == 0) continue;
+            if (impl_->live_out_.count(a) != 0U) continue;
+            last_use[a] = i;
+        }
+    }
+
+    // Schedule a memory.erase() one instruction after each address's
+    // last read.
+    std::vector<std::vector<uint64_t>> free_after(insts.size());
+    for (const auto& [addr, death] : last_use) {
+        size_t pos = death + 1;
+        if (pos < free_after.size()) {
+            free_after[pos].push_back(addr);
+        }
+    }
+    impl_->free_after_ = std::move(free_after);
+
+    size_t total_frees = 0;
+    for (const auto& v : impl_->free_after_) total_frees += v.size();
+    std::cout << "[FHETCH_SIM] Liveness: " << total_frees
+              << " frees scheduled across " << insts.size()
+              << " instructions, " << impl_->live_out_.size()
+              << " live-out pinned" << std::endl;
+}
+
+const std::vector<std::vector<uint64_t>>&
+Simulator::get_free_after_for_test() const {
+    return impl_->free_after_;
 }
 
 }  // namespace niobium::fhetch_sim

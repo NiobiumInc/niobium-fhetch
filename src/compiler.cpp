@@ -795,6 +795,16 @@ bool Compiler::replay() {
     }
     std::cout << std::endl;
 
+    // Collect probe/output addresses so liveness leaves them in memory for
+    // write_replay_outputs() to read after run() returns.
+    std::vector<uint64_t> live_out;
+    for (const auto& output : impl_->captured_outputs) {
+        live_out.insert(live_out.end(),
+                        output.addr_ids.begin(), output.addr_ids.end());
+    }
+    impl_->simulator->set_live_out_addresses(live_out);
+    impl_->simulator->compute_liveness();
+
     auto result = impl_->simulator->run();
 
     if (result.errors > 0) {

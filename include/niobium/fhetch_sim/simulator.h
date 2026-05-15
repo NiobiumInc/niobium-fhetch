@@ -81,6 +81,24 @@ public:
     /// propagate from zero-initialized sources.
     void prematerialize_zero_inits();
 
+    /// Mark addresses that must NOT be freed during execution. The compiler's
+    /// replay() pass calls this with every probe/output address before run(),
+    /// so write_replay_outputs() can still read them after execution finishes.
+    void set_live_out_addresses(const std::vector<uint64_t>& addrs);
+
+    /// Liveness-driven free schedule: forward last_use scan, then a
+    /// memory.erase() scheduled one instruction after each address's
+    /// last read. Must be called after load_trace() and (optionally)
+    /// set_live_out_addresses(). `NIOBIUM_DISABLE_SIM_FREES` skips
+    /// the pass entirely.
+    void compute_liveness();
+
+    /// Test-only accessor: returns the per-instruction free schedule built
+    /// by compute_liveness(). Each inner vector holds the addresses freed
+    /// after the instruction at that index. Used by test_simulator_liveness;
+    /// production callers should not rely on this.
+    const std::vector<std::vector<uint64_t>>& get_free_after_for_test() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

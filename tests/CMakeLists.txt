@@ -60,3 +60,11 @@ target_link_libraries(plaintext_add_decrypt PRIVATE niobium_fhetch)
 set_openfhe_rpath(plaintext_add_client)
 set_openfhe_rpath(plaintext_add_server)
 set_openfhe_rpath(plaintext_add_decrypt)
+
+# ==============================================================================
+# Regression: dest==src1 for automorph kernels.
+# ==============================================================================
+
+add_executable(automorph_alias_test automorph_alias_test/test.cpp)
+target_link_libraries(automorph_alias_test PRIVATE niobium_fhetch)
+set_openfhe_rpath(automorph_alias_test)
