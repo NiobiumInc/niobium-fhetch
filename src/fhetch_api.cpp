@@ -797,8 +797,15 @@ std::vector<uint64_t> sr_sample_extract(const SRPArray& /*rlwe*/, uint64_t lwe_d
 
 Polynomial sr_automorph_eval(const Polynomial& x, uint64_t k) {
     auto result = make_result(x);
+    // The permutation is modulus-independent, but the niobium-compiler
+    // replay parser expects every sr_* line to carry a modulus token
+    // (`morph2 dest src k modulus`). Emit the COPY_MODULUS sentinel so
+    // the line parses cleanly; `remember_modulus` already no-ops on
+    // COPY_MODULUS so no spurious address-to-modulus binding gets made.
+    constexpr uint64_t kCopyModulus = 0xFFFFFFFFFFFFFFFFULL;
     emit("sr_automorph_eval " + addr(result.impl()->address) + ", " +
-         addr(x.impl()->address) + ", k=" + std::to_string(k));
+         addr(x.impl()->address) + ", k=" + std::to_string(k) +
+         ", " + midx(kCopyModulus));
     return result;
 }
 
