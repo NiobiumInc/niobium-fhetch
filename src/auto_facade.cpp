@@ -96,6 +96,13 @@ NB_WEAK void on_deserialize_ciphertext(
     // Default — no-op.
 }
 
+NB_WEAK void on_make_plaintext(lbcrypto::Plaintext& /*pt*/) {
+    // Default — no-op. Strong override in libniobium_client_autofacade
+    // tags freshly-made plaintexts on record and rehydrates them from
+    // disk on replay so the FHETCH simulator has the encoded polys as
+    // live-in data.
+}
+
 NB_WEAK void lazy_init(const lbcrypto::CryptoContext<DCRTPoly>& /*cc*/) {
     // Default — init is explicit via compiler().init().
 }
@@ -364,6 +371,89 @@ static bool write_plaintext_input_files(
     ar(static_cast<uint32_t>(1));  // num_elements (a plaintext is a single DCRTPoly)
     ar(el);
     return bin_stream.good();
+}
+
+// Replay-side reader for <prog>.input_<name>.bin + .ids written by
+// write_plaintext_input_files during recording. Reads the addr_ids and
+// each DCRTPoly tower's (modulus, values), then store_input_elements them
+// into captured_inputs at the recorded addresses so Compiler::replay()'s
+// simulator-load step finds the plaintext live-in data at the addresses
+// the trace references.
+//
+// Used by libniobium_client_autofacade's on_make_plaintext override when
+// it sees a null pt (replay shortcut from cryptocontext.h's
+// MakeCKKSPackedPlaintext) — the encoding work is skipped on replay,
+// but the recorded bytes from the prior record run still need to land
+// in sim memory.
+static bool load_plaintext_input_file_impl(
+    niobium::Compiler& compiler,
+    const std::string& input_name) {
+    auto dir = compiler.get_program_directory();
+    std::string prog = compiler.program_name();
+    auto ids_path = dir / (prog + ".input_" + input_name + ".ids");
+    auto bin_path = dir / (prog + ".input_" + input_name + ".bin");
+
+    if (!std::filesystem::exists(ids_path) || !std::filesystem::exists(bin_path))
+        return false;
+
+    auto addr_ids = niobium::cereal_io::read_addr_ids(ids_path);
+    if (addr_ids.empty()) {
+        std::cerr << "[NIOBIUM] load_plaintext_input('" << input_name
+                  << "'): empty addr-id file " << ids_path << std::endl;
+        return false;
+    }
+
+    std::ifstream bin_stream(bin_path, std::ios::binary);
+    if (!bin_stream.is_open()) {
+        std::cerr << "[NIOBIUM] load_plaintext_input('" << input_name
+                  << "'): cannot open " << bin_path << std::endl;
+        return false;
+    }
+    try {
+        cereal::PortableBinaryInputArchive ar(bin_stream);
+        uint32_t instances_count = 0;
+        uint8_t  payload_type    = 0;
+        uint32_t num_elements    = 0;
+        ar(instances_count);
+        ar(payload_type);
+        ar(num_elements);
+        if (payload_type != 1) {
+            std::cerr << "[NIOBIUM] load_plaintext_input('" << input_name
+                      << "'): payload_type=" << static_cast<int>(payload_type)
+                      << " is not PLAINTEXT(1)" << std::endl;
+            return false;
+        }
+        // num_elements is always 1 for plaintext (a single DCRTPoly).
+        DCRTPoly dcrt;
+        ar(dcrt);
+
+        const auto& towers = dcrt.GetAllElements();
+        if (towers.size() != addr_ids.size()) {
+            std::cerr << "[NIOBIUM] load_plaintext_input('" << input_name
+                      << "'): tower count " << towers.size()
+                      << " != addr_id count " << addr_ids.size() << std::endl;
+            return false;
+        }
+        for (size_t ti = 0; ti < towers.size(); ++ti) {
+            auto& poly_const = towers[ti];
+            auto& poly = const_cast<lbcrypto::NativePoly&>(poly_const);
+            if (poly.GetFormat() != Format::EVALUATION)
+                poly.SetFormat(Format::EVALUATION);
+            uint64_t modulus = poly.GetModulus().ConvertToInt();
+            size_t n = poly.GetLength();
+            std::vector<uint64_t> vals(n);
+            const auto& vec = poly.GetValues();
+            for (size_t i = 0; i < n; ++i) vals[i] = vec[i].ConvertToInt();
+            compiler.store_input_element(input_name, niobium::CapturedKind::SRP,
+                                         /*starts_new_element=*/false,
+                                         addr_ids[ti], modulus, vals);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NIOBIUM] load_plaintext_input('" << input_name
+                  << "'): " << e.what() << std::endl;
+        return false;
+    }
+    return true;
 }
 
 // Walk a Plaintext's DCRTPoly towers — pin each tower's poly_id, allocate
@@ -1105,6 +1195,10 @@ bool write_ciphertext_input_bin(
     const lbcrypto::Ciphertext<DCRTPoly>& ct,
     const std::vector<uint64_t>& addr_ids) {
     return write_ciphertext_input_files(name, ct, addr_ids);
+}
+
+bool load_plaintext_input_file(const std::string& name) {
+    return load_plaintext_input_file_impl(niobium::compiler(), name);
 }
 
 }  // namespace niobium::detail
