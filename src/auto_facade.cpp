@@ -1007,17 +1007,51 @@ void Compiler::reconstruct_probes() const {
         }
 
         // Walk the template's NativePolys in lockstep with sim_elements;
-        // apply each computed entry, leave gaps untouched.
+        // every tower MUST be filled by a "computed" sim entry — silently
+        // leaving towers as their template values would re-export the
+        // recording's ciphertext, which decrypts past CKKS tolerance for
+        // any non-trivial computation and disguises the bug as a tolerance
+        // failure deep in user code. Refuse to write the probe if coverage
+        // is incomplete; result() will then return false and the caller
+        // gets an explicit "Result not found" instead of garbage.
         try {
             const auto& sim_elements = output_entry["elements"];
+            size_t total_towers = 0;
+            for (auto& dcrt : ct->GetElements())
+                total_towers += dcrt.GetAllElements().size();
+            if (sim_elements.size() != total_towers) {
+                std::cerr << "[NIOBIUM] reconstruct_probes('" << name
+                          << "'): sim_elements=" << sim_elements.size()
+                          << " != template_towers=" << total_towers
+                          << " — refusing to write incomplete probe" << std::endl;
+                continue;
+            }
+
             size_t elem_idx = 0;
+            size_t filled = 0;
+            std::vector<size_t> skipped;
             for (auto& dcrt : ct->GetElements()) {
                 for (auto& native_poly : dcrt.GetAllElements()) {
-                    if (elem_idx >= sim_elements.size()) break;
-                    if (auto ce = parse_sim_element(sim_elements[elem_idx++]))
+                    if (auto ce = parse_sim_element(sim_elements[elem_idx])) {
                         apply_sim_output(native_poly, *ce);
+                        ++filled;
+                    } else {
+                        skipped.push_back(elem_idx);
+                    }
+                    ++elem_idx;
                 }
             }
+            if (filled != total_towers) {
+                std::cerr << "[NIOBIUM] reconstruct_probes('" << name
+                          << "'): only " << filled << "/" << total_towers
+                          << " towers had 'computed' sim values (skipped indices: ";
+                for (size_t i = 0; i < skipped.size() && i < 10; ++i)
+                    std::cerr << skipped[i] << (i + 1 < skipped.size() ? "," : "");
+                if (skipped.size() > 10) std::cerr << ",...";
+                std::cerr << ") — refusing to write partial probe" << std::endl;
+                continue;
+            }
+
             auto ct_path = serialized_dir / (name + ".ct");
             if (lbcrypto::Serial::SerializeToFile(ct_path.string(), ct, lbcrypto::SerType::BINARY)) {
                 std::cout << "[NIOBIUM] Serialized probe '" << name << "' to " << ct_path << std::endl;
