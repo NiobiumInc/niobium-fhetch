@@ -540,6 +540,9 @@ struct Simulator::Impl {
             if (memory.size() > peak_mem) peak_mem = memory.size();
 
             // Release addresses whose last use was this instruction.
+            // free_after_ is empty when NIOBIUM_DISABLE_SIM_FREES=1
+            // skipped compute_liveness; otherwise it is sized to the
+            // instruction count and the bound is always satisfied.
             if (i < free_after_.size()) {
                 for (uint64_t a : free_after_[i]) memory.erase(a);
             }
@@ -725,14 +728,12 @@ void Simulator::compute_liveness() {
         }
     }
 
-    // Schedule a memory.erase() one instruction after each address's
-    // last read.
+    // Schedule a memory.erase() at the end of each address's last-use
+    // instruction. The kernel for that instruction has already read
+    // its sources by the time the execute loop consults free_after_.
     std::vector<std::vector<uint64_t>> free_after(insts.size());
     for (const auto& [addr, death] : last_use) {
-        size_t pos = death + 1;
-        if (pos < free_after.size()) {
-            free_after[pos].push_back(addr);
-        }
+        free_after[death].push_back(addr);
     }
     impl_->free_after_ = std::move(free_after);
 
