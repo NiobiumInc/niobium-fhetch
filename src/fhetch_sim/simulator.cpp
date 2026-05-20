@@ -77,9 +77,6 @@ struct Simulator::Impl {
 
     // Decode `inst` into the addresses it reads and writes.
     static InstUses classify_uses(const Instruction& inst) {
-        const uint64_t d = inst.dest;
-        const uint64_t a = inst.src1;
-        const uint64_t b = inst.src2;
         switch (inst.opcode) {
         // No-ops: comments, unknowns, halt, and unimplemented stubs
         // (execute() runs these as bare `ok = true`, no memory.set, so
@@ -106,8 +103,10 @@ struct Simulator::Impl {
         // (see exec_mulps); the other immediate-form ops read src1.
         case OpCode::SR_MULPS:
             return inst.immediate == 0
-                ? InstUses{.write = d, .writes = true, .reads = {0, 0}, .n_reads = 0}
-                : InstUses{.write = d, .writes = true, .reads = {a, 0}, .n_reads = 1};
+                ? InstUses{.write = inst.dest, .writes = true,
+                           .reads = {0, 0}, .n_reads = 0}
+                : InstUses{.write = inst.dest, .writes = true,
+                           .reads = {inst.src1, 0}, .n_reads = 1};
 
         // One-source ops: write dest, read src1.
         case OpCode::SR_NEGP:
@@ -119,11 +118,13 @@ struct Simulator::Impl {
         case OpCode::SR_SUBPS:
         case OpCode::SR_ADDPS_COEFF:
         case OpCode::SR_SUBPS_COEFF:
-            return {.write = d, .writes = true, .reads = {a, 0}, .n_reads = 1};
+            return {.write = inst.dest, .writes = true,
+                    .reads = {inst.src1, 0}, .n_reads = 1};
 
         // Two-source arithmetic (sr_addp / sr_subp / sr_mulp).
         default:
-            return {.write = d, .writes = true, .reads = {a, b}, .n_reads = 2};
+            return {.write = inst.dest, .writes = true,
+                    .reads = {inst.src1, inst.src2}, .n_reads = 2};
         }
     }
 
