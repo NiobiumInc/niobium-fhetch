@@ -1109,13 +1109,17 @@ void Compiler::reconstruct_probes() const {
             size_t total_towers = 0;
             for (auto& dcrt : ct->GetElements())
                 total_towers += dcrt.GetAllElements().size();
-            if (sim_elements.size() != total_towers) {
+            if (sim_elements.size() < total_towers) {
                 std::cerr << "[NIOBIUM] reconstruct_probes('" << name
                           << "'): sim_elements=" << sim_elements.size()
-                          << " != template_towers=" << total_towers
+                          << " < template_towers=" << total_towers
                           << " — refusing to write incomplete probe" << std::endl;
                 continue;
             }
+            // sim may emit MORE entries than the template needs (e.g. the
+            // fhetch_driver tags output addrs multiple times during re-drive,
+            // producing duplicate sim_elements per address). We just consume
+            // the first total_towers entries against the template's towers.
 
             size_t elem_idx = 0;
             size_t filled = 0;
