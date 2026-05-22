@@ -1050,12 +1050,20 @@ static void apply_sim_output(lbcrypto::NativePoly& native_poly, const ComputedEl
                                   std::to_string(ce.values.size()) +
                                   " != ring_dim=" + std::to_string(ring_dim));
     }
+    // Preserve the template's params. Reconstructing via
+    // ILNativeParams(2*ring_dim, mod) (the 2-arg form) leaves
+    // bigModulus / bigRootOfUnity at their default zero values, while
+    // the cryptocontext-built params object the template was serialized
+    // from carries the precomputed non-default values for those fields.
+    // Cereal serializes every field, so even when the modulus +
+    // RootOfUnity match, the leftover bigModulus / bigRootOfUnity
+    // mismatch makes the reconstructed bytes diverge from the
+    // recording's. Just SetValues on the existing poly and keep
+    // everything else intact.
+    auto fmt = native_poly.GetFormat();
     lbcrypto::NativeInteger mod = (ce.modulus == COPY_MODULUS)
                                       ? native_poly.GetModulus()
                                       : lbcrypto::NativeInteger(ce.modulus);
-    auto fmt = native_poly.GetFormat();
-    auto params = std::make_shared<lbcrypto::ILNativeParams>(2 * ring_dim, mod);
-    native_poly = lbcrypto::NativePoly(params, fmt, /*initializeElementToZero=*/true);
     lbcrypto::NativeVector nv(ring_dim, mod);
     for (size_t i = 0; i < ring_dim; ++i)
         nv[i] = lbcrypto::NativeInteger(ce.values[i]);

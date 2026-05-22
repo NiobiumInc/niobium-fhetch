@@ -52,15 +52,25 @@ static std::unordered_map<uintptr_t, uint64_t>& address_modulus_map() {
 }
 
 static void remember_modulus(uintptr_t a, uint64_t q) {
-    // Never cache the copy-sentinel modulus (0xFFFFFFFFFFFFFFFF emitted with
-    // m=0 from copy-style sr_addps %d, %s, 0 instructions). It doesn't
-    // describe the polynomial's actual modulus — the real modulus shows up
-    // on the first non-copy op that uses the address.
+    // The copy-sentinel modulus (0xFFFFFFFFFFFFFFFF, emitted with m=0 from
+    // copy-style sr_addps %d, %s, 0) doesn't describe the polynomial's
+    // actual modulus. But we still need *some* entry in the map: tagged
+    // inputs that are only used in copy ops would otherwise be dropped
+    // by sync_fhetch_state_to_compiler()'s mod_map.find guard, producing
+    // unloaded live-in addresses at the secondary replay
+    // (see tests/double_load reproducer).
     constexpr uint64_t COPY_SENTINEL = 0xFFFFFFFFFFFFFFFFULL;
-    if (q == COPY_SENTINEL) return;
     auto& m = address_modulus_map();
     auto it = m.find(a);
-    if (it == m.end()) m.emplace(a, q);  // first *real* write wins
+    if (it == m.end()) {
+        // First mention — record whatever we have, sentinel or real.
+        m.emplace(a, q);
+    } else if (it->second == COPY_SENTINEL && q != COPY_SENTINEL) {
+        // Upgrade sentinel → real modulus when a non-copy op finally
+        // describes this address's actual modulus.
+        it->second = q;
+    }
+    // else: first *real* modulus wins; ignore subsequent calls.
 }
 
 // ============================================================================
