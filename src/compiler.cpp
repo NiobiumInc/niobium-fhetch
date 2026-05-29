@@ -138,6 +138,10 @@ struct Compiler::Impl {
     // without forcing the user to call a specific API for it.
     std::function<void()> auto_capture_at_stop;
 
+    // Gate for capture_crypto_context()'s install of the bootstrap-precompute
+    // auto-capture hook. Default true preserves legacy behavior.
+    bool auto_capture_bootstrap_precompute_enabled = true;
+
     // Hook invoked by stop() after trace_writer.stop_recording() but before
     // write_replay_json. Cleared by reset(); not by stop().
     std::function<void()> post_recording_hook;
@@ -375,6 +379,14 @@ void Compiler::clear_captured() {
 
 void Compiler::set_auto_capture_at_stop(std::function<void()> fn) {
     impl_->auto_capture_at_stop = std::move(fn);
+}
+
+void Compiler::set_auto_capture_bootstrap_precompute(bool enabled) {
+    impl_->auto_capture_bootstrap_precompute_enabled = enabled;
+}
+
+bool Compiler::auto_capture_bootstrap_precompute_enabled() const {
+    return impl_->auto_capture_bootstrap_precompute_enabled;
 }
 
 void Compiler::set_post_recording_hook(std::function<void()> fn) {
