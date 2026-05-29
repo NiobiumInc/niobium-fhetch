@@ -311,6 +311,11 @@ class Compiler {
     /// (e.g. CKKS bootstrap precompute) without a user-facing API.
     void set_auto_capture_at_stop(std::function<void()> fn);
 
+    /// Enable or disable the automatic CKKS bootstrap precompute capture
+    /// installed by capture_crypto_context() (default: enabled).
+    void set_auto_capture_bootstrap_precompute(bool enabled);
+    bool auto_capture_bootstrap_precompute_enabled() const;
+
     /// Register a callback to run inside stop() AFTER trace_writer.stop_recording()
     /// but BEFORE write_replay_json. Lets downstream layers do OpenFHE work
     /// without polluting the trace. Pass nullptr to clear; reset() also clears.

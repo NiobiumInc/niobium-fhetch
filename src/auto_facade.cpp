@@ -203,9 +203,11 @@ void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
     // precomputed data (e.g. CKKS bootstrap precompute). Must run at
     // stop() — not here — because EvalBootstrapSetup fires its
     // precompute probes AFTER capture_crypto_context returns.
-    set_auto_capture_at_stop([this, cc]() {
-        this->tag_bootstrap_precompute(cc);
-    });
+    if (auto_capture_bootstrap_precompute_enabled()) {
+        set_auto_capture_at_stop([this, cc]() {
+            this->tag_bootstrap_precompute(cc);
+        });
+    }
 
     // Serialize the CryptoContext to <program_dir>/cryptocontext.dat so the
     // compiler-side --target replay driver (nbcc_fhetch_replay) can load it
