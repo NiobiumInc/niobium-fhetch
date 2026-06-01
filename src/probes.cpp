@@ -113,6 +113,13 @@ static void emit(const std::string& instruction) {
 // Forward-declared here; defined in the copy/move probe section below.
 static std::unordered_map<uint64_t, uint64_t> g_data_parent;
 
+// Gate for ALL probe side-effects (IR emission AND the address/lineage
+// bookkeeping in g_address_map / g_data_parent). Every probe that maps an
+// address or records lineage routes through this, so openfhe_suppress_probes()
+// fully suppresses OpenFHE host-side work — host-only plaintext encoding can
+// run mid-recording without polluting the maps the input loader propagates
+// through. Equal to running_p() whenever not suppressed, so normal recording
+// is unchanged.
 static bool should_record() {
     return niobium::compiler().running_p() && !g_suppressed && !g_serialization_thread;
 }
@@ -186,13 +193,13 @@ void openfhe_cprobe_id(uintptr_t poly_id) {
 
 uintptr_t* openfhe_cprobe_address(uintptr_t poly_id) {
     std::scoped_lock lock(g_probe_mutex);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
     return nullptr;
 }
 
 uintptr_t* openfhe_cprobe_result(uintptr_t poly_id) {
     std::scoped_lock lock(g_probe_mutex);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
     return nullptr;
 }
 
@@ -211,25 +218,25 @@ uintptr_t* openfhe_cprobe_cache() {
 void openfhe_cprobe_discrete_gaussian(uintptr_t poly_id, int /*format*/) {
     std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 void openfhe_cprobe_discrete_uniform(uintptr_t poly_id, int /*format*/) {
     std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 void openfhe_cprobe_binary_uniform(uintptr_t poly_id, int /*format*/) {
     std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 void openfhe_cprobe_ternary_uniform(uintptr_t poly_id, int /*format*/) {
     std::scoped_lock lock(g_probe_mutex);
     g_pinned_openfhe_ids.insert(poly_id);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 // Number of times precompute probe fired vs. how many of those id's are
@@ -253,7 +260,7 @@ void openfhe_cprobe_zero(uintptr_t poly_id, int /*format*/, uint64_t modulus) {
     // bails on !running_p()). During EvalBootstrapSetup this probe fires
     // thousands of times for intermediate DCRTPoly towers — allocating
     // addresses for them eats up the compact id space.
-    if (!niobium::compiler().running_p()) return;
+    if (!should_record()) return;
 
     uintptr_t a = map_address(poly_id);
     std::string mi = (modulus != 0) ? midx(modulus) : "m=0";
@@ -265,7 +272,7 @@ void openfhe_cprobe_zero(uintptr_t poly_id, int /*format*/, uint64_t modulus) {
 
 void openfhe_cprobe_max(uintptr_t poly_id, int /*format*/, uint64_t /*modulus*/) {
     std::scoped_lock lock(g_probe_mutex);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 // ============================================================================
@@ -274,17 +281,17 @@ void openfhe_cprobe_max(uintptr_t poly_id, int /*format*/, uint64_t /*modulus*/)
 
 void openfhe_cprobe_input(uintptr_t poly_id, int /*format*/) {
     std::scoped_lock lock(g_probe_mutex);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 void openfhe_cprobe_output(uintptr_t poly_id, int /*format*/) {
     std::scoped_lock lock(g_probe_mutex);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 void openfhe_cprobe_key(uintptr_t poly_id, int /*format*/) {
     std::scoped_lock lock(g_probe_mutex);
-    if (niobium::compiler().running_p()) map_address(poly_id);
+    if (should_record()) map_address(poly_id);
 }
 
 // ============================================================================
@@ -297,7 +304,7 @@ void openfhe_cprobe_copy(uintptr_t dst_id, uintptr_t src_id) {
     // Matches the compiler's Generator::copy(): bail entirely if not
     // recording. Setup-time copies shouldn't reach the trace or
     // allocate addresses — they just consume compact id space.
-    if (!niobium::compiler().running_p()) return;
+    if (!should_record()) return;
 
     uintptr_t src_addr = map_address(src_id);
     uintptr_t dst_addr = map_address(dst_id);
@@ -313,7 +320,7 @@ void openfhe_cprobe_move(uintptr_t dst_id, uintptr_t src_id) {
     // Matches the compiler's Generator::move(): bail if not recording.
     // Setup-time moves (very common from std::move() of intermediate
     // polys in OpenFHE's EvalBootstrapSetup) must not allocate addresses.
-    if (!niobium::compiler().running_p()) return;
+    if (!should_record()) return;
     uintptr_t src_addr = map_address(src_id);
     g_address_map[dst_id] = src_addr;
 }
