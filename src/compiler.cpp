@@ -1171,6 +1171,10 @@ std::filesystem::path Compiler::get_program_directory() const {
     return dir;
 }
 
+void Compiler::set_program_directory(const std::filesystem::path& dir) {
+    impl_->program_dir = dir;
+}
+
 // Friend function declared in compiler.h — provides internal access to Impl.
 Compiler::Impl& compiler_impl(Compiler& c) {
     return *c.impl_;

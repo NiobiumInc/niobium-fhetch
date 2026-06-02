@@ -285,6 +285,12 @@ class Compiler {
     /// Get or create the program directory for output files.
     std::filesystem::path get_program_directory() const;
 
+    /// Override the program directory for output files. When set (non-empty),
+    /// get_program_directory() returns this path verbatim instead of the
+    /// cwd/<program_name> default. Set before stop()/stop_epoch() writes the
+    /// trace so inputs, templates, and the .fhetch land in `dir`.
+    void set_program_directory(const std::filesystem::path& dir);
+
     // ====================================================================
     // CONVENIENCE
     // ====================================================================
