@@ -32,6 +32,13 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -Wextra -Wunused-but-set-variable -Wno-un
 option(BUILD_SHARED_LIBS   "Build shared libraries instead of static ones" ON)
 option(WITH_FHETCH_SIM     "Build the standalone FHETCH simulator CLI (fhetch_sim). The simulator is always linked into the library because Compiler::replay() uses it." ON)
 
+# Link OpenFHE's *_static.a archives instead of the shared OPENFHE* libraries.
+# Default OFF preserves the historical shared link exactly. Turned ON by parents
+# (e.g. haze) that absorb OpenFHE into a single symbol-isolated shared object;
+# requires an OpenFHE install built with -DBUILD_STATIC=ON under OPENFHE_LIBRARY_PATH.
+option(NIOBIUM_FHETCH_OPENFHE_STATIC
+       "Link OpenFHE's *_static.a archives instead of the shared OPENFHE* libraries." OFF)
+
 # ==============================================================================
 # OpenFHE dependency (built and installed separately via Makefile targets)
 # ==============================================================================
@@ -48,11 +55,19 @@ set(OPENFHE_INCLUDE_DIRS
 
 set(OPENFHE_LIBRARY_PATH "${OPENFHE_INSTALL_DIR}/lib")
 
-set(OPENFHE_LIBRARIES
-    OPENFHEbinfhe
-    OPENFHEcore
-    OPENFHEpke
-)
+if(NIOBIUM_FHETCH_OPENFHE_STATIC)
+  set(OPENFHE_LIBRARIES
+      OPENFHEbinfhe_static
+      OPENFHEcore_static
+      OPENFHEpke_static
+  )
+else()
+  set(OPENFHE_LIBRARIES
+      OPENFHEbinfhe
+      OPENFHEcore
+      OPENFHEpke
+  )
+endif()
 
 # nlohmann/json (header-only, single_include).
 # Cache var so a parent project (e.g. niobium-compiler) can inject its own
