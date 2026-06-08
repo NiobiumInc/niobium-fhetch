@@ -39,6 +39,11 @@ extern char** environ;
 // When true, polynomial operations skip expensive math but preserve structure.
 namespace lbcrypto { extern bool g_hollow_mode; }
 
+// Cooperative auto-tagging opt-in. Weak no-op stub lives in auto_facade.cpp;
+// a strong override in libnbclient_autofacade switches the facade into
+// cooperative (tag-only, host-driven-lifecycle) mode.
+namespace niobium_auto { void enable_auto_tagging(); }
+
 namespace niobium {
 
 // ============================================================================
@@ -80,6 +85,12 @@ struct Compiler::Impl {
     std::vector<uint64_t> inverse_modulus_chain;
     bool niobium_hw_mode = false;
 
+    // Cooperative auto-tagging (set by enable_auto_tagging()). When true,
+    // replay() refreshes stale inputs from the manifest and dispatches a
+    // disk-based replay (local fhetch_driver / remote forwarder) instead of
+    // the in-process, in-memory-captured_inputs simulator path.
+    bool auto_tagging = false;
+
     // Key start addr_ids (first addr_id recorded for each key type)
     uint64_t evalmult_start_addr_id = 0;
     uint64_t evalautomorphism_start_addr_id = 0;
@@ -106,6 +117,13 @@ struct Compiler::Impl {
     struct InputRecord {
         std::string name;
         CapturedKind kind;
+        // On-disk source file this input was loaded from + its mtime at tag
+        // time (set via set_input_source). Persisted to inputs.json so a later
+        // replay run can detect changed input files by mtime and refresh only
+        // those against the recorded addresses. Empty source_path → not a
+        // file-backed input (e.g. a made plaintext); skip the staleness check.
+        std::string source_path;
+        int64_t source_mtime = 0;
         std::vector<PolyElement> elements;
         // Array-element boundaries for SRPArray / MRPArray. element_starts[i]
         // is the index into `elements` where array position i begins. For
@@ -210,6 +228,13 @@ void Compiler::init(int& argc, char** argv) {
         std::cout << "[NIOBIUM] Target: " << impl_->target
                   << " (replay will hand off to nbcc_fhetch_replay)" << std::endl;
     }
+}
+
+void Compiler::enable_auto_tagging() {
+    impl_->auto_tagging = true;
+    // Delegate to the auto-facade. Weak stub is a no-op; the strong override
+    // in libnbclient_autofacade switches the facade into cooperative mode.
+    niobium_auto::enable_auto_tagging();
 }
 
 bool Compiler::start() {
@@ -482,6 +507,28 @@ void Compiler::store_input_element(const std::string& input_name,
     rec.elements.push_back({addr_id, modulus, values});
 }
 
+void Compiler::set_input_source(const std::string& input_name,
+                                const std::string& source_path) {
+    auto it = impl_->captured_input_index.find(input_name);
+    if (it == impl_->captured_input_index.end())
+        return;  // no record yet — nothing to annotate
+    auto& rec = impl_->captured_inputs[it->second];
+    rec.source_path = source_path;
+    // mtime as a raw clock count: implementation-defined units/epoch, but
+    // stable on the same machine/filesystem across runs, so equality
+    // comparison between the record run and a later replay run is valid.
+    rec.source_mtime = 0;
+    try {
+        std::error_code ec;
+        auto t = std::filesystem::last_write_time(source_path, ec);
+        if (!ec)
+            rec.source_mtime =
+                static_cast<int64_t>(t.time_since_epoch().count());
+    } catch (...) {
+        // leave source_mtime = 0 (treated as "unknown" → always refresh)
+    }
+}
+
 void Compiler::store_output_probe(const std::string& output_name,
                                   CapturedKind kind, bool starts_new_element,
                                   uint64_t addr_id, uint64_t modulus) {
@@ -585,6 +632,20 @@ bool Compiler::replay() {
     if (impl_->ring_dimension == 0) {
         std::cerr << "[NIOBIUM] Ring dimension not set — call capture_crypto_context() before replay()" << std::endl;
         return false;
+    }
+
+    // ----- Cooperative (host-driven) replay -----------------------------------
+    // The host program ran zero ops this pass (gated behind is_cache_valid), so
+    // the in-memory captured_inputs are incomplete. Instead: refresh any input
+    // files that changed since record (mtime) onto their recorded addresses,
+    // then dispatch a DISK-based replay that reads the refreshed project —
+    // local via the standalone fhetch_driver, remote via the compiler forwarder.
+    // result() then reads serialized_probes/<name>.ct for both.
+    if (impl_->auto_tagging) {
+        refresh_stale_inputs();
+        if (impl_->target != "local")
+            return dispatch_to_compiler_target();
+        return run_local_fhetch_driver();
     }
 
     // ----- Target != local: hand the fhetch project off to the compiler -----
@@ -916,6 +977,89 @@ bool Compiler::dispatch_to_compiler_target() {
     return true;
 }
 
+bool Compiler::run_local_fhetch_driver() {
+    auto dir = get_program_directory();
+    std::string prog = impl_->full_program_name();
+
+    std::string exec;
+    if (const char* env = std::getenv("NBCC_FHETCH_DRIVER")) exec = env;
+    else exec = "fhetch_driver";
+
+    auto probes_dir = dir / "serialized_probes";
+    std::filesystem::create_directories(probes_dir);
+
+    // Recorded probe names come from <prog>.outputs.json (written at record
+    // time). On a replay pass the host calls no probe(), so memory is empty —
+    // read the names back from disk.
+    std::vector<std::string> output_names;
+    {
+        std::ifstream ifs(dir / (prog + ".outputs.json"));
+        if (ifs.is_open()) {
+            auto j = nlohmann::json::parse(ifs, nullptr, /*allow_exceptions=*/false);
+            if (!j.is_discarded() && j.contains("outputs"))
+                for (const auto& o : j["outputs"]) {
+                    auto n = o.value("name", std::string());
+                    if (!n.empty()) output_names.push_back(n);
+                }
+        }
+    }
+    if (output_names.empty()) {
+        std::cerr << "[NIOBIUM] run_local_fhetch_driver: no probe names in "
+                  << (dir / (prog + ".outputs.json")) << std::endl;
+        return false;
+    }
+
+    // driver <trace> --ring-dim N --source-dir <dir> --cc <cc>
+    //        --output-ct <name>:<serialized_probes/<name>.ct> ...
+    std::string ring_dim_str = std::to_string(impl_->ring_dimension);
+    std::string cc_path = (dir / "cryptocontext.dat").string();
+    std::vector<std::string> args = {
+        exec, impl_->last_trace_path.string(),
+        "--ring-dim", ring_dim_str,
+        "--source-dir", dir.string(),
+        "--cc", cc_path,
+    };
+    for (const auto& name : output_names) {
+        args.push_back("--output-ct");
+        args.push_back(name + ":" + (probes_dir / (name + ".ct")).string());
+    }
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (auto& a : args) argv.push_back(const_cast<char*>(a.c_str()));
+    argv.push_back(nullptr);
+
+    std::cout << "[NIOBIUM] Cooperative local replay via " << exec << " ("
+              << output_names.size() << " probe(s))" << std::endl;
+
+    pid_t pid = 0;
+    int spawn_err = ::posix_spawnp(&pid, exec.c_str(), nullptr, nullptr,
+                                   argv.data(), environ);
+    int rc = -1;
+    if (spawn_err == 0) {
+        int status = 0;
+        if (::waitpid(pid, &status, 0) == pid) {
+            if (WIFEXITED(status)) rc = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status)) rc = 128 + WTERMSIG(status);
+        }
+    } else {
+        std::cerr << "[NIOBIUM] posix_spawnp(fhetch_driver) failed: errno="
+                  << spawn_err << std::endl;
+    }
+    if (rc != 0) {
+        std::cerr << "[NIOBIUM] fhetch_driver failed (exit " << rc
+                  << "). Is it on PATH, or NBCC_FHETCH_DRIVER set?" << std::endl;
+        return false;
+    }
+    if (!std::filesystem::exists(probes_dir) || std::filesystem::is_empty(probes_dir)) {
+        std::cerr << "[NIOBIUM] fhetch_driver produced no serialized probes in "
+                  << probes_dir << std::endl;
+        return false;
+    }
+    std::cout << "[NIOBIUM] Cooperative local replay complete. Probes in "
+              << probes_dir << std::endl;
+    return true;
+}
+
 // ============================================================================
 // write_replay_json — serialize inputs, outputs, and metadata for replay
 // ============================================================================
@@ -1002,6 +1146,14 @@ void Compiler::write_replay_json() {
             idx["ids_file"] = prog + ".input_" + input.name + ".ids";
             idx["bin_file"] = prog + ".input_" + input.name + ".bin";
             idx["instances_count"] = 1;
+            // Staleness metadata for cooperative replay: the on-disk file this
+            // input was loaded from and its mtime at record time. A later
+            // replay run compares the current mtime to refresh only changed
+            // inputs (see Compiler::set_input_source / replay refresh).
+            if (!input.source_path.empty()) {
+                idx["source_path"] = input.source_path;
+                idx["source_mtime"] = input.source_mtime;
+            }
             inputs_arr.push_back(idx);
         }
         inputs_index["inputs"] = inputs_arr;
