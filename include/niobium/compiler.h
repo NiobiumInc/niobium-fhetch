@@ -78,6 +78,15 @@ class Compiler {
     /// Parses and consumes Niobium-specific flags from argv.
     void init(int &argc, char **argv);
 
+    /// Opt into cooperative auto-tagging: the host program drives the
+    /// record/replay lifecycle explicitly (init/cache_parameters/start/stop/
+    /// probe/replay/result), while the auto-facade transparently tags inputs
+    /// and keys (capturing their file paths) via the OpenFHE deserialize
+    /// hooks. No YAML config is consulted. No-op unless a strong auto-facade
+    /// implementation is linked. Call right after init(), before loading the
+    /// crypto context.
+    void enable_auto_tagging();
+
     /// Begin instruction recording.
     /// Must be called before performing any FHE operations to record.
     /// @return true if recording started successfully.
@@ -252,6 +261,14 @@ class Compiler {
     /// internal processing between tag_input/tag_keys and start().
     void refresh_all_inputs();
 
+    /// Cooperative-replay staleness refresh: read inputs.json, and for each
+    /// file-backed input whose on-disk source file mtime differs from the
+    /// recorded mtime, reload that file and rewrite its .bin against the
+    /// recorded .ids addresses. Unchanged inputs are left untouched. Lets a
+    /// replay run pick up new keys/data without re-recording or re-running the
+    /// computation. Returns the number of inputs refreshed.
+    int refresh_stale_inputs();
+
     // ====================================================================
     // FUNCTIONAL EPOCHS
     // ====================================================================
@@ -344,6 +361,15 @@ class Compiler {
     void store_output_probe(const std::string &output_name, CapturedKind kind,
                             bool starts_new_element, uint64_t addr_id, uint64_t modulus);
 
+    // Record the on-disk source file a captured input was loaded from, plus its
+    // current modification time. Persisted into inputs.json so a later replay
+    // run can detect (by mtime) which input files changed and refresh only
+    // those against the recorded addresses — the cached_input/cached_key
+    // equivalent for cooperative auto-tagging. No-op if `input_name` has no
+    // captured record yet.
+    void set_input_source(const std::string &input_name,
+                          const std::string &source_path);
+
   private:
     void write_replay_json();
     void write_replay_outputs();
@@ -352,6 +378,13 @@ class Compiler {
     /// nbcc_fhetch_replay executable (used when --target=<non-local>).
     /// Returns true if the external driver succeeded and probes were written.
     bool dispatch_to_compiler_target();
+
+    /// Cooperative local replay: spawn the standalone fhetch_driver over the
+    /// (refreshed) project dir, reconstructing every recorded probe into
+    /// <program_dir>/serialized_probes/<name>.ct so result() reads them the
+    /// same way it does for the remote path. Driver path from the
+    /// NBCC_FHETCH_DRIVER env var (falls back to "fhetch_driver" on PATH).
+    bool run_local_fhetch_driver();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

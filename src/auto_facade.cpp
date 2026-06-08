@@ -103,6 +103,13 @@ NB_WEAK void on_make_plaintext(lbcrypto::Plaintext& /*pt*/) {
     // live-in data.
 }
 
+NB_WEAK void enable_auto_tagging() {
+    // Default — no-op. Strong override in libniobium_client_autofacade
+    // switches the facade into cooperative (tag-only, host-driven-lifecycle)
+    // mode so input/key tagging happens via the deserialize hooks while the
+    // host program owns init/cache/start/stop/probe/replay/result.
+}
+
 NB_WEAK void lazy_init(const lbcrypto::CryptoContext<DCRTPoly>& /*cc*/) {
     // Default — init is explicit via compiler().init().
 }
@@ -272,6 +279,80 @@ static bool write_ciphertext_input_files(
     return bin_stream.good();
 }
 
+// Count the polynomials (towers across all DCRTPoly elements) in a ciphertext.
+static size_t ciphertext_poly_count(const lbcrypto::Ciphertext<DCRTPoly>& ct) {
+    size_t n = 0;
+    for (const auto& dcrt : ct->GetElements())
+        n += dcrt.GetAllElements().size();
+    return n;
+}
+
+// Cooperative-replay staleness refresh. See Compiler::refresh_stale_inputs in
+// the header. Lives here (not compiler.cpp) because it does OpenFHE
+// deserialization + reuses write_ciphertext_input_files.
+int Compiler::refresh_stale_inputs() {
+    namespace fs = std::filesystem;
+    auto dir = get_program_directory();
+    std::string prog = program_name();
+    auto idx_path = dir / (prog + ".inputs.json");
+
+    std::ifstream ifs(idx_path);
+    if (!ifs.is_open()) return 0;  // no manifest → nothing to refresh
+    nlohmann::json idx = nlohmann::json::parse(ifs, nullptr, /*allow_exceptions=*/false);
+    if (idx.is_discarded() || !idx.contains("inputs")) return 0;
+
+    int refreshed = 0, skipped = 0;
+    for (const auto& in : idx["inputs"]) {
+        if (!in.contains("source_path")) continue;  // not file-backed (e.g. a made plaintext)
+        std::string name = in.value("name", std::string());
+        std::string src  = in.value("source_path", std::string());
+        int64_t rec_mtime = in.value("source_mtime", static_cast<int64_t>(0));
+        if (name.empty() || src.empty()) continue;
+
+        std::error_code ec;
+        auto t = fs::last_write_time(src, ec);
+        int64_t cur_mtime = ec ? 0 : static_cast<int64_t>(t.time_since_epoch().count());
+        if (cur_mtime != 0 && cur_mtime == rec_mtime) { ++skipped; continue; }  // unchanged
+
+        // Changed (or mtime unknown): reload the source and rewrite its .bin
+        // against the RECORDED addresses so the trace's live-in addrs map to
+        // the new values without re-recording.
+        auto ids_path = dir / (prog + ".input_" + name + ".ids");
+        auto addr_ids = niobium::cereal_io::read_addr_ids(ids_path);
+        if (addr_ids.empty()) {
+            std::cerr << "[NIOBIUM] refresh: no recorded addresses for '" << name
+                      << "' (" << ids_path << "); skipping" << std::endl;
+            continue;
+        }
+        lbcrypto::Ciphertext<DCRTPoly> ct;
+        if (!lbcrypto::Serial::DeserializeFromFile(src, ct, lbcrypto::SerType::BINARY) || !ct) {
+            std::cerr << "[NIOBIUM] refresh: failed to reload '" << name << "' from " << src
+                      << std::endl;
+            continue;
+        }
+        // The recorded address list and the reloaded ciphertext must describe
+        // the same polynomial layout, or the .bin/.ids would desync. This holds
+        // when the new run uses the same crypto parameters (ring dim, modulus
+        // chain) — only the key/data values differ.
+        size_t npolys = ciphertext_poly_count(ct);
+        if (npolys != addr_ids.size()) {
+            std::cerr << "[NIOBIUM] refresh: '" << name << "' poly count " << npolys
+                      << " != recorded address count " << addr_ids.size()
+                      << " (crypto params changed?); skipping" << std::endl;
+            continue;
+        }
+        if (!write_ciphertext_input_files(name, ct, addr_ids)) {
+            std::cerr << "[NIOBIUM] refresh: failed to rewrite .bin for '" << name << "'"
+                      << std::endl;
+            continue;
+        }
+        ++refreshed;
+    }
+    std::cout << "[NIOBIUM] refresh_stale_inputs: " << refreshed << " refreshed, "
+              << skipped << " unchanged" << std::endl;
+    return refreshed;
+}
+
 // Serialize a Ciphertext<DCRTPoly> shell to
 // <program_dir>/ciphertext_templates/<name>.template; the replay path fills
 // it from simulator output and re-emits as serialized_probes/<name>.ct.
@@ -322,12 +403,18 @@ template<>
 void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
     const std::string& input_name,
     lbcrypto::Ciphertext<DCRTPoly>& ct,
-    std::optional<std::filesystem::path> /*file*/) {
+    std::optional<std::filesystem::path> file) {
     // Collect addr_ids and in-memory data
     std::vector<uint64_t> addr_ids;
     capture_ciphertext_polys(*this, input_name, ct, addr_ids);
 
     write_ciphertext_input_files(input_name, ct, addr_ids);
+
+    // Record the on-disk source + mtime so a later cooperative replay can
+    // detect (by mtime) whether this input changed and refresh only the
+    // changed ones against the recorded addresses.
+    if (file)
+        set_input_source(input_name, file->string());
 
     // Store reference for re-extraction at replay() time
     g_stored_ciphertexts.push_back(ct);
