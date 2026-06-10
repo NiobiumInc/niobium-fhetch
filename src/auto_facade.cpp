@@ -704,7 +704,7 @@ static size_t capture_dcrt_polys(Compiler& compiler,
         }
     }
 
-    if (count > 0) {
+    if (count > 0 && capture_debug_enabled()) {
         std::cout << "[NIOBIUM] captured " << key_name << ": " << count
                   << " polys";
         if (coeff_count) std::cout << "  (" << coeff_count << " still in COEFF form!)";
@@ -773,10 +773,12 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
             vals);
     }
 
-    std::cout << "[NIOBIUM] captured " << name << ": " << towers.size()
-              << " polys";
-    if (zero_count) std::cout << "  (" << zero_count << " all-zero)";
-    std::cout << std::endl;
+    if (capture_debug_enabled()) {
+        std::cout << "[NIOBIUM] captured " << name << ": " << towers.size()
+                  << " polys";
+        if (zero_count) std::cout << "  (" << zero_count << " all-zero)";
+        std::cout << std::endl;
+    }
 
     auto dir = niobium::compiler().get_program_directory();
     std::filesystem::create_directories(dir);
