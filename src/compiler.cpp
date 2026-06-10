@@ -101,6 +101,12 @@ struct Compiler::Impl {
     // --target=<value> on the CLI consumed by init().
     std::string target = "local";
 
+    // Optimization level for the compiler-side replay, normalized to "O0".."O3".
+    // Defaults to O0 (conservative); overridable via --opt-level=<v> on the CLI.
+    // Forwarded to the replay driver (and on to the transport server) so the
+    // chosen level reaches the compiler's nbcc_fhetch_replay.
+    std::string opt_level = "O0";
+
     // Last written trace path (set by stop())
     std::filesystem::path last_trace_path;
 
@@ -202,9 +208,19 @@ Compiler::~Compiler() = default;
 // Session lifecycle
 // ============================================================================
 
+// Normalize a user-supplied optimization level ("3", "O3", "o3") to the
+// canonical "O0".."O3". Returns "" if the value is not a recognized level.
+static std::string normalize_opt_level(const std::string& v) {
+    std::string s = v;
+    if (!s.empty() && (s[0] == 'O' || s[0] == 'o')) s = s.substr(1);
+    if (s.size() == 1 && s[0] >= '0' && s[0] <= '3') return std::string("O") + s[0];
+    return "";
+}
+
 void Compiler::init(int& argc, char** argv) {
     // Parse and consume Niobium-specific flags from argv.
-    // Recognized flags: --hollow, --multithreaded, --target=<value>, -v
+    // Recognized flags: --hollow, --multithreaded, --target=<value>,
+    // --opt-level=<O0..O3>, -v
     int write_pos = 1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -216,6 +232,12 @@ void Compiler::init(int& argc, char** argv) {
             impl_->target = a + 9;
         } else if (std::strcmp(a, "--target") == 0 && i + 1 < argc) {
             impl_->target = argv[++i];
+        } else if (std::strncmp(a, "--opt-level=", 12) == 0) {
+            std::string lvl = normalize_opt_level(a + 12);
+            if (!lvl.empty()) impl_->opt_level = lvl;
+        } else if (std::strcmp(a, "--opt-level") == 0 && i + 1 < argc) {
+            std::string lvl = normalize_opt_level(argv[++i]);
+            if (!lvl.empty()) impl_->opt_level = lvl;
         } else if (std::strcmp(a, "-v") == 0) {
             impl_->verbose = true;
         } else {
@@ -927,20 +949,28 @@ bool Compiler::dispatch_to_compiler_target() {
     // metacharacters; PATH lookup semantics are preserved.
     std::string project_arg = "--project=" + dir.string();
     std::string target_arg = "--target=" + impl_->target;
-    char* argv[] = {
+    // Forward a non-default optimization level so it reaches the compiler-side
+    // replay (the forwarder turns it into an X-Opt-Level header; the server
+    // turns that into a native -O<n>). Omit at O0 so the default path's argv —
+    // and an old forwarder that ignores the flag — behave exactly as before.
+    std::string opt_arg = "--opt-level=" + impl_->opt_level;
+    const bool send_opt = (impl_->opt_level != "O0");
+    std::vector<char*> argv = {
         const_cast<char*>(exec.c_str()),
         project_arg.data(),
         target_arg.data(),
-        nullptr
     };
+    if (send_opt) argv.push_back(opt_arg.data());
+    argv.push_back(nullptr);
 
     std::cout << "[NIOBIUM] Dispatching replay to compiler target '"
               << impl_->target << "' via: " << exec << " "
-              << project_arg << " " << target_arg << std::endl;
+              << project_arg << " " << target_arg
+              << (send_opt ? " " + opt_arg : "") << std::endl;
 
     pid_t pid = 0;
     int spawn_err = ::posix_spawnp(&pid, exec.c_str(), nullptr, nullptr,
-                                   argv, environ);
+                                   argv.data(), environ);
     int rc = -1;
     if (spawn_err == 0) {
         int status = 0;
