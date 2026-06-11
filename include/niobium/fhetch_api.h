@@ -592,10 +592,24 @@ std::vector<uint64_t> sr_sample_extract(const SRPArray& rlwe, uint64_t lwe_dim);
 //  GADGETS — Polynomial level (Class I: simple, verifiable by inspection)
 // ============================================================================
 
+/// Record the address→modulus metadata binding for `p` without emitting an
+/// instruction (upgrades a copy-sentinel binding; never downgrades a real
+/// one). Use after recording a canonical sentinel-modulus op (pass-through
+/// copy, eval-form automorphism) when the residue's real modulus is known:
+/// captured output shapes need it for transport probe serialization.
+void bind_modulus(const Polynomial& p, uint64_t q);
+
 /// Galois automorphism in evaluation representation.
 /// @param x  Integer polynomial in evaluation form.
 /// @param k  Odd integer in [1, 2N-1].
 Polynomial sr_automorph_eval(const Polynomial& x, uint64_t k);
+
+/// Galois automorphism in evaluation representation, bound to the residue's
+/// modulus `q`. Prefer this overload when the modulus is known: it records
+/// the address-to-modulus binding the transport replay's trace-modulus
+/// contract requires for outputs (the modulus-less overload emits the copy
+/// sentinel, whose outputs cannot be probe-serialized by nbcc_fhetch_replay).
+Polynomial sr_automorph_eval(const Polynomial& x, uint64_t k, uint64_t q);
 
 /// Galois automorphism in coefficient representation.
 /// @param x  Integer polynomial in coefficient form.
