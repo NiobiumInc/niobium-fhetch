@@ -577,6 +577,15 @@ Polynomial sr_addp(const Polynomial& a, const Polynomial& b, uint64_t q) {
     return result;
 }
 
+void bind_modulus(const Polynomial& p, uint64_t q) {
+    // Metadata-only: records the address→modulus binding (upgrading a copy
+    // sentinel) without emitting any instruction. For callers that record a
+    // canonical sentinel-modulus op (copy / eval morph) but know the
+    // residue's real modulus, which captured output shapes need for
+    // transport probe serialization.
+    remember_modulus(p.impl()->address, q);
+}
+
 Polynomial sr_addps(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a);
     remember_modulus(a.impl()->address, q);
@@ -806,21 +815,45 @@ std::vector<uint64_t> sr_sample_extract(const SRPArray& /*rlwe*/, uint64_t lwe_d
 // ============================================================================
 
 Polynomial sr_automorph_eval(const Polynomial& x, uint64_t k) {
-    auto result = make_result(x);
     // The permutation is modulus-independent, but the niobium-compiler
     // replay parser expects every sr_* line to carry a modulus token
-    // (`morph2 dest src k modulus`). Emit the COPY_MODULUS sentinel so
-    // the line parses cleanly; `remember_modulus` already no-ops on
-    // COPY_MODULUS so no spurious address-to-modulus binding gets made.
+    // (`morph2 dest src k modulus`). With no modulus available at this
+    // overload, emit the COPY_MODULUS sentinel so the line parses cleanly;
+    // `remember_modulus` already no-ops on COPY_MODULUS so no spurious
+    // address-to-modulus binding gets made. Prefer the 3-arg overload when
+    // the residue's modulus is known — sentinel-modulus outputs violate the
+    // transport trace-modulus contract (see copy_residue).
     constexpr uint64_t kCopyModulus = 0xFFFFFFFFFFFFFFFFULL;
+    auto result = make_result(x);
     emit("sr_automorph_eval " + addr(result.impl()->address) + ", " +
          addr(x.impl()->address) + ", k=" + std::to_string(k) +
          ", " + midx(kCopyModulus));
     return result;
 }
 
+Polynomial sr_automorph_eval(const Polynomial& x, uint64_t k, uint64_t q) {
+    // Same emission as the 2-arg overload — the sentinel modulus token is
+    // the canonical morph form (matches niobium-compiler's
+    // sr_automorph_eval, which emits COPY_MODULUS: the permutation doesn't
+    // depend on the modulus). `q` lands in the address→modulus metadata
+    // only, so captured output shapes carry the real modulus the transport
+    // replay's probe serialization requires.
+    constexpr uint64_t kCopyModulus = 0xFFFFFFFFFFFFFFFFULL;
+    auto result = make_result(x);
+    emit("sr_automorph_eval " + addr(result.impl()->address) + ", " +
+         addr(x.impl()->address) + ", k=" + std::to_string(k) +
+         ", " + midx(kCopyModulus));
+    remember_modulus(x.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
+    return result;
+}
+
 Polynomial sr_automorph_coeff(const Polynomial& x, uint64_t k, uint64_t q) {
     auto result = make_result(x, Format::Coefficient);
+    // Bind both addresses so the captured output shape carries the real
+    // modulus (transport trace-modulus contract; see copy_residue).
+    remember_modulus(x.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_automorph_coeff " + addr(result.impl()->address) + ", " +
          addr(x.impl()->address) + ", k=" + std::to_string(k) +
          ", " + midx(q));
@@ -829,6 +862,8 @@ Polynomial sr_automorph_coeff(const Polynomial& x, uint64_t k, uint64_t q) {
 
 Polynomial sr_rot_automorph_coeff(const Polynomial& x, uint64_t offset, uint64_t q) {
     auto result = make_result(x, Format::Coefficient);
+    remember_modulus(x.impl()->address, q);
+    remember_modulus(result.impl()->address, q);
     emit("sr_rot_automorph_coeff " + addr(result.impl()->address) + ", " +
          addr(x.impl()->address) + ", offset=" + std::to_string(offset) +
          ", " + midx(q));
@@ -912,7 +947,7 @@ MRP mr_intt(const MRP& x) {
 MRP mr_automorph_eval(const MRP& x, uint64_t k) {
     const auto& base = x.base();
     MRP z(base, x[base[0]].ring_dimension());
-    for (auto q : base) z[q] = sr_automorph_eval(x[q], k);
+    for (auto q : base) z[q] = sr_automorph_eval(x[q], k, q);
     return z;
 }
 
@@ -1053,20 +1088,47 @@ std::vector<Polynomial> prescale_by_q_hat(const MRP& x, const std::vector<uint64
 }
 
 // Center scaled_i mod q_i (signed-preserving) and rebase to mod target_p.
-// niobium-compiler's generator emits a single `switchmodulus` IR op that the
-// hardware/optimizer lowers to four scalar instructions; libnbfhetch's
-// simulator has no such opcode, so we lower to 3 available sr_* ops directly:
-//   shifted   = (scaled + halfQ_i)   mod q_i      (sr_addps)
-//   rebased   = shifted              mod target_p (sr_mulps with imm=1)
-//   unshifted = (rebased + (-halfQ_i mod p)) mod p (sr_addps with additive inverse)
-// For scaled in [0, halfQ]:    unshifted = scaled mod p              (centered ≥ 0)
+//
+// Emits the canonical 4-op muli/addi/muli/addi lowering in SSA form: each
+// op writes a fresh result address and reads the previous op's result, so
+// every address in the trace is defined exactly once (FHETCH traces are
+// canonically SSA; haze's other ops already are via make_result). The
+// recorded immediates are the ordinary-form ones — client traces are
+// always ordinary-form, and hardware-izing happens driver-side: the
+// compiler-side replay driver (fhetch_driver) recognizes this exact
+// quadruple STRUCTURALLY (def-use chained, immediates fully determined by
+// (q_i, target_p), intermediates consumed only by the chain) and
+// substitutes a single SwitchModulus pseudo-op whose immediates are
+// recomputed for the active data format — under --niobium_hw that is the
+// Montgomery variant (R^2 mod p / -R*halfQ mod p). No marker comment is
+// needed or emitted.
+//
+// The immediates cannot be baked Montgomery-form client-side: the same
+// trace replays in BOTH modes (ordinary replay would see spurious R
+// factors), and under --niobium_hw the driver blanket-converts every
+// muli/addi immediate at codegen, which would double-encode pre-converted
+// ones. The cross-modulus rebase step additionally has no constant
+// immediates valid under both interpretations ((v*R mod q) mod p is not
+// linear in v mod p), so per-mode substitution at replay is required.
+//
+// Ordinary semantics (muli-by-1 is an identity kept for the recognizable
+// shape):
+//   shifted   = (scaled + halfQ_i)   mod q_i
+//   rebased   = shifted              mod target_p
+//   unshifted = (rebased + (-halfQ_i mod p)) mod p
+// For scaled in [0, halfQ]:    unshifted = scaled mod p              (centered >= 0)
 // For scaled in (halfQ, q_i):  unshifted = (scaled - q_i) mod p      (centered < 0)
 Polynomial center_mod_q_into_p(const Polynomial& scaled_i, uint64_t q_i, uint64_t target_p) {
-    const uint64_t halfQ = (q_i - 1U) / 2U;
-    auto shifted = sr_addps(scaled_i, Scalar::from_int(halfQ), q_i);
-    auto rebased = sr_mulps(shifted, Scalar::from_int(1), target_p);
-    const uint64_t neg_half_mod_p = (target_p - (halfQ % target_p)) % target_p;
-    return sr_addps(rebased, Scalar::from_int(neg_half_mod_p), target_p);
+    // Ordinary-form immediates, spelled inline: the client never computes
+    // Montgomery constants — the replay driver owns the hardware transform
+    // and recomputes these per replay mode when it substitutes the block.
+    const uint64_t half_q = (q_i - 1U) / 2U;
+    const uint64_t x = half_q % target_p;
+    const uint64_t neg_half = (x == 0U) ? 0U : target_p - x;
+    auto t1 = sr_mulps(scaled_i, Scalar::from_int(1), q_i);
+    auto t2 = sr_addps(t1, Scalar::from_int(half_q), q_i);
+    auto t3 = sr_mulps(t2, Scalar::from_int(1), target_p);
+    return sr_addps(t3, Scalar::from_int(neg_half), target_p);
 }
 
 // One term of the FBC sum at target prime p:
@@ -1095,11 +1157,21 @@ Polynomial sum_fbc_terms(const std::vector<Polynomial>& scaled, const ModuliBase
 }
 
 // Pass-through copy via sr_addps with imm=0 and the COPY_SENTINEL modulus
-// (0xFFFF...FF). remember_modulus already special-cases this sentinel so it
-// doesn't pollute the address-modulus map; the simulator's exec_addps with
-// imm=0 does a vector copy regardless of q.
-Polynomial copy_residue(const Polynomial& src) {
-    return sr_addps(src, Scalar::from_int(0), /*q=*/0xFFFFFFFFFFFFFFFFULL);
+// (0xFFFF...FF). The sentinel in the op token is a hardware contract — the
+// compiler reserves modulus-table index 0 for it (Frontend/llvm/Memory.h
+// ModulusTable::COPY_MODULUS_INDEX) and lowers ADDI imm=0 at m[0] as a
+// register copy rather than a modular add — so it must stay in the trace.
+//
+// The address→modulus METADATA still needs the residue's real modulus `p`:
+// captured output shapes feed the replay-bridge templates and the replay
+// outputs index, and a sentinel-only output cannot be probe-serialized by
+// nbcc_fhetch_replay ("SetValues(): Parameter mismatch" between the
+// synthetic-CC template prime and the computed modulus). remember_modulus
+// upgrades the emission's sentinel binding to `p` without touching the op.
+Polynomial copy_residue(const Polynomial& src, uint64_t p) {
+    auto z = sr_addps(src, Scalar::from_int(0), /*q=*/0xFFFFFFFFFFFFFFFFULL);
+    remember_modulus(z.impl()->address, p);
+    return z;
 }
 
 // target_base = source_base \ rescale_base, preserving source_base order.
@@ -1163,7 +1235,7 @@ MRP fast_base_convert(const MRP& x, const ModuliBase& target_base, FbcVariant va
     const std::unordered_set<uint64_t> source_set(source_base.begin(), source_base.end());
     for (uint64_t p : target_base) {
         if (source_set.find(p) != source_set.end()) {
-            pairs.emplace_back(copy_residue(x[p]), p);
+            pairs.emplace_back(copy_residue(x[p], p), p);
             continue;
         }
         const auto q_star = q_hat_mod_p(source_base, p);

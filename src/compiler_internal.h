@@ -25,6 +25,13 @@ using niobium::CapturedShape;
 /// Get the global TraceWriter instance (owned by the Compiler singleton).
 TraceWriter& trace_writer();
 
+/// Hardware data-format toggles parsed by Compiler::init()
+/// (--montgomery / --bit_reversal / --niobium_hw). Read by fhetch_api.cpp
+/// to select Montgomery-form immediates and the hardware switchmodulus
+/// lowering, and by store_input_element's callers/tests.
+bool montgomery_mode();
+bool bit_reversal_mode();
+
 /// Look up the FHETCH address for an OpenFHE polynomial ID.
 /// Returns (uint64_t)-1 if not found.
 uint64_t lookup_fhetch_address(uintptr_t openfhe_poly_id);

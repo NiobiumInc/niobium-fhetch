@@ -83,7 +83,17 @@ struct Compiler::Impl {
     std::string security_level;
     std::vector<uint64_t> modulus_chain;
     std::vector<uint64_t> inverse_modulus_chain;
-    bool niobium_hw_mode = false;
+
+    // Hardware data-format toggles, selected via --montgomery /
+    // --bit_reversal / --niobium_hw (= both) on the CLI consumed by init().
+    // Client recordings stay ordinary-form regardless; the toggles select
+    // the *replay* data format: dispatch_to_compiler_target() forwards
+    // --niobium_hw to nbcc_fhetch_replay when both are on, and the driver
+    // hardware-izes inputs/immediates/switchmodulus blocks itself. The
+    // Niobium hardware convention is both together; partial combinations
+    // are rejected at replay().
+    bool montgomery_mode = false;
+    bool bitrev_mode = false;
 
     // Cooperative auto-tagging (set by enable_auto_tagging()). When true,
     // replay() refreshes stale inputs from the manifest and dispatches a
@@ -220,7 +230,9 @@ static std::string normalize_opt_level(const std::string& v) {
 void Compiler::init(int& argc, char** argv) {
     // Parse and consume Niobium-specific flags from argv.
     // Recognized flags: --hollow, --multithreaded, --target=<value>,
-    // --opt-level=<O0..O3>, -v
+    // --opt-level=<O0..O3>, -v, --montgomery, --bit_reversal,
+    // --niobium_hw (= montgomery + bit_reversal, the Niobium hardware
+    // convention; matches the compiler's flag of the same name).
     int write_pos = 1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -232,6 +244,13 @@ void Compiler::init(int& argc, char** argv) {
             impl_->target = a + 9;
         } else if (std::strcmp(a, "--target") == 0 && i + 1 < argc) {
             impl_->target = argv[++i];
+        } else if (std::strcmp(a, "--montgomery") == 0) {
+            impl_->montgomery_mode = true;
+        } else if (std::strcmp(a, "--bit_reversal") == 0) {
+            impl_->bitrev_mode = true;
+        } else if (std::strcmp(a, "--niobium_hw") == 0) {
+            impl_->montgomery_mode = true;
+            impl_->bitrev_mode = true;
         } else if (std::strncmp(a, "--opt-level=", 12) == 0) {
             std::string lvl = normalize_opt_level(a + 12);
             if (!lvl.empty()) impl_->opt_level = lvl;
@@ -249,6 +268,11 @@ void Compiler::init(int& argc, char** argv) {
     if (impl_->target != "local") {
         std::cout << "[NIOBIUM] Target: " << impl_->target
                   << " (replay will hand off to nbcc_fhetch_replay)" << std::endl;
+    }
+    if (impl_->montgomery_mode || impl_->bitrev_mode) {
+        std::cout << "[NIOBIUM] Hardware data format:"
+                  << (impl_->montgomery_mode ? " montgomery" : "")
+                  << (impl_->bitrev_mode ? " bit_reversal" : "") << std::endl;
     }
 }
 
@@ -477,6 +501,8 @@ void Compiler::reset() {
     impl_->build_timestamp.clear();
     impl_->auto_capture_at_stop = nullptr;
     impl_->post_recording_hook = nullptr;
+    impl_->montgomery_mode = false;
+    impl_->bitrev_mode = false;
 }
 
 namespace {
@@ -639,6 +665,25 @@ uint32_t Compiler::epoch_id() const {
 // ============================================================================
 
 bool Compiler::replay() {
+    // Hardware-format guard rails. The in-process simulator executes in
+    // ordinary form only, and the transport replay engine couples Montgomery
+    // and bit-reversal behind the single niobium_hw flag — so local replay
+    // rejects either toggle, and transport replay rejects partial toggles.
+    if (impl_->montgomery_mode || impl_->bitrev_mode) {
+        if (impl_->target == "local") {
+            std::cerr << "[NIOBIUM] montgomery/bit_reversal modes are not supported by the "
+                         "in-process simulator; use a transport target (e.g. FUNC_SIM)"
+                      << std::endl;
+            return false;
+        }
+        if (impl_->montgomery_mode != impl_->bitrev_mode) {
+            std::cerr << "[NIOBIUM] transport replay supports ordinary form or the full "
+                         "hardware format (montgomery + bit_reversal) only; enable both "
+                         "(--niobium_hw) or neither" << std::endl;
+            return false;
+        }
+    }
+
     if (impl_->last_trace_path.empty()) {
         // Look for an existing trace (cached)
         auto dir = get_program_directory();
@@ -941,6 +986,12 @@ bool Compiler::dispatch_to_compiler_target() {
     // metacharacters; PATH lookup semantics are preserved.
     std::string project_arg = "--project=" + dir.string();
     std::string target_arg = "--target=" + impl_->target;
+    // The replay driver takes hardware mode from its own CLI (the FUNC_SIM
+    // device spec defaults montgomery_enabled=false), so forward the full
+    // hardware format explicitly. Partial combinations were already rejected
+    // by replay() before dispatch.
+    std::string hw_arg = "--niobium_hw";
+    const bool hw = impl_->montgomery_mode && impl_->bitrev_mode;
     // Forward a non-default optimization level so it reaches the compiler-side
     // replay (the forwarder turns it into an X-Opt-Level header; the server
     // turns that into a native -O<n>). Omit at O0 so the default path's argv —
@@ -952,12 +1003,13 @@ bool Compiler::dispatch_to_compiler_target() {
         project_arg.data(),
         target_arg.data(),
     };
+    if (hw) argv.push_back(hw_arg.data());
     if (send_opt) argv.push_back(opt_arg.data());
     argv.push_back(nullptr);
 
     std::cout << "[NIOBIUM] Dispatching replay to compiler target '"
               << impl_->target << "' via: " << exec << " "
-              << project_arg << " " << target_arg
+              << project_arg << " " << target_arg << (hw ? " --niobium_hw" : "")
               << (send_opt ? " " + opt_arg : "") << std::endl;
 
     pid_t pid = 0;
@@ -1248,7 +1300,11 @@ void Compiler::write_replay_json() {
     // cereal_binary key reader consume this format.
     replay["evalmult_format"] = "cereal_binary";
     replay["evalautomorphism_format"] = "cereal_binary";
-    replay["niobium_hw"] = impl_->niobium_hw_mode;
+    // Client recordings are always ordinary-form (standard residues, natural
+    // order, ordinary immediates); this flag describes the recording, not the
+    // replay target. Hardware-izing (input data, immediates, switchmodulus
+    // blocks) happens driver-side when dispatch passes --niobium_hw.
+    replay["niobium_hw"] = false;
     replay["num_registers"] = 16;
     replay["config_sectors"] = 1;
     replay["hbm_mode"] = "interleaved";
@@ -1462,6 +1518,14 @@ namespace niobium::detail {
 TraceWriter& trace_writer() {
     auto& impl = niobium::compiler_impl(niobium::compiler());
     return impl.trace_writer;
+}
+
+bool montgomery_mode() {
+    return niobium::compiler_impl(niobium::compiler()).montgomery_mode;
+}
+
+bool bit_reversal_mode() {
+    return niobium::compiler_impl(niobium::compiler()).bitrev_mode;
 }
 
 }  // namespace niobium::detail
