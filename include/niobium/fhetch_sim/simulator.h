@@ -79,7 +79,6 @@ public:
     /// vector in simulator memory at that address. Called by replay()
     /// as part of the load-time population so the data-parent chain can
     /// propagate from zero-initialized sources.
-    void prematerialize_zero_inits();
 
     /// Mark addresses that must NOT be freed during execution. The compiler's
     /// replay() pass calls this with every probe/output address before run(),

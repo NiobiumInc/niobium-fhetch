@@ -723,14 +723,6 @@ bool Compiler::replay() {
         return false;
     }
 
-    // Pre-materialize zero-initialized addresses so the data-parent chain
-    // below can propagate through them. Preamble instructions that write
-    // a known zero to an address (e.g. `sr_mulps %x, %x, 0, m=N`) are
-    // emitted when OpenFHE's SetValuesToZero fires, but the simulator
-    // wouldn't execute them until run() — populating up-front lets
-    // downstream children inherit correctly during the propagation pass.
-    impl_->simulator->prematerialize_zero_inits();
-
     // Pull in any state registered via the FHETCH-only tag_input / tag_output
     // path (fhetch_api.cpp). For OpenFHE flows this is a no-op — the
     // auto-facade has already populated captured_inputs / captured_outputs.
