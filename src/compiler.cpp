@@ -6,12 +6,14 @@
 #include "niobium/fhetch_sim/simulator.h"
 #include "compiler_internal.h"
 #include "trace_writer.h"
+#include "niobium/checks.h"
 
 #include <cassert>
 #include <cstdint>
 #include <memory>
 #include <cstdlib>
 #include <algorithm>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <nlohmann/json.hpp>
@@ -21,7 +23,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <vector>
-#include <utility>
 
 // `environ` is POSIX-required globally but not declared by <unistd.h>
 // uniformly across platforms (Darwin needs the explicit extern).
@@ -74,6 +75,12 @@ struct Compiler::Impl {
 
     // Epochs
     uint32_t epoch_id = 0;
+
+    // Overrides for the crypto context checks
+    // These checks verify that primes and ring dimension are compatible with
+    // the Niobium Hardware
+    bool check_primes = true;
+    bool check_ring_dim = true;
 
     // Crypto context info (populated by capture_crypto_context)
     uint64_t ring_dimension = 0;
@@ -230,7 +237,7 @@ static std::string normalize_opt_level(const std::string& v) {
 void Compiler::init(int& argc, char** argv) {
     // Parse and consume Niobium-specific flags from argv.
     // Recognized flags: --hollow, --multithreaded, --target=<value>,
-    // --opt-level=<O0..O3>, -v, --montgomery, --bit_reversal,
+    // --opt-level=<O0..O3>, -v, --no-prime-check, --no-ring-dim-check, --montgomery, --bit_reversal,
     // --niobium_hw (= montgomery + bit_reversal, the Niobium hardware
     // convention; matches the compiler's flag of the same name).
     int write_pos = 1;
@@ -259,6 +266,10 @@ void Compiler::init(int& argc, char** argv) {
             if (!lvl.empty()) impl_->opt_level = lvl;
         } else if (std::strcmp(a, "-v") == 0) {
             impl_->verbose = true;
+        } else if (std::strcmp(a, "--no-prime-check") == 0) {
+            impl_->check_primes = false;
+        } else if (std::strcmp(a, "--no-ring-dim-check") == 0) {
+            impl_->check_ring_dim = false;
         } else {
             argv[write_pos++] = argv[i];
         }
@@ -396,6 +407,9 @@ bool Compiler::is_cache_valid() {
 // ============================================================================
 
 void Compiler::set_ring_dimension(uint64_t N) {
+    if(impl_->check_ring_dim && !is_compatible_ring_dim(N)) {
+        throw std::runtime_error("Ring dimension " + std::to_string(N) + " is not compatible with Niobium Hardware.");
+    }
     impl_->ring_dimension = N;
 }
 
@@ -413,6 +427,9 @@ void Compiler::set_crypto_context_info(const std::string& scheme_name,
     // Compute inverse modulus chain (Hensel lifting)
     impl_->inverse_modulus_chain.clear();
     for (uint64_t q : modulus_chain) {
+        if(impl_->check_primes && !is_compatible_prime(q)) {
+            throw std::runtime_error("Modulus " + std::to_string(q) + " is not compatible with Niobium Hardware.");
+        }
         uint64_t ninv = 1;
         for (int i = 1; i < 64; i++) {
             if (((q * ninv) >> i) & 1)
@@ -484,9 +501,11 @@ void Compiler::reset() {
     impl_->epoch_id = 0;
     impl_->modulus_chain.clear();
     impl_->inverse_modulus_chain.clear();
+    impl_->check_primes = true;
     impl_->scheme_name.clear();
     impl_->security_level.clear();
     impl_->ring_dimension = 0;
+    impl_->check_ring_dim = true;
     impl_->multiplicative_depth = 0;
     impl_->scaling_mod_size = 0;
     impl_->evalmult_start_addr_id = 0;

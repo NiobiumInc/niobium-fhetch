@@ -205,12 +205,12 @@ release: config-release build-release ## Shortcut: configure + build everything 
 test-simple-fhetch: build ## Record + replay the FHETCH-only simple example (Debug)
 	$(call set-build-config,Debug,dbuild)
 	@rm -rf simple_fhetch_example_simple
-	$(BUILD_DIR)/examples/simple_fhetch
+	$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check
 
 test-simple-fhetch-release: build-release ## Record + replay the FHETCH-only simple example (Release)
 	$(call set-build-config,Release,build)
 	@rm -rf simple_fhetch_example_simple
-	$(BUILD_DIR)/examples/simple_fhetch
+	$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check
 
 # Re-drive a .fhetch trace through the API via tests/fhetch_driver.
 # Pass a trace path as TRACE=/path/to/file.fhetch, ring dim as N=2048.
@@ -227,18 +227,18 @@ test-fhetch-driver: build ## Re-drive a .fhetch trace (Debug). TRACE=<path> N=<r
 	@if [ -z "$(TRACE)" ]; then \
 		echo "[test-fhetch-driver] TRACE unset — running simple_fhetch to produce one"; \
 		rm -rf simple_fhetch_example_simple; \
-		$(BUILD_DIR)/examples/simple_fhetch; \
+		$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check; \
 	fi
-	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N)
+	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N) --no-ring-dim-check
 
 test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's trace
 	$(call set-build-config,Release,build)
 	@if [ -z "$(TRACE)" ]; then \
 		echo "[test-fhetch-driver-release] TRACE unset — running simple_fhetch to produce one"; \
 		rm -rf simple_fhetch_example_simple; \
-		$(BUILD_DIR)/examples/simple_fhetch; \
+		$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check; \
 	fi
-	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N)
+	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N) --no-ring-dim-check
 
 # ==============================================================================
 # End-to-end roundtrip tests (primary + secondary via fhetch_driver)
@@ -254,14 +254,14 @@ define roundtrip-simple-op
 	@echo "=== Roundtrip $(1) ==="
 	@rm -rf simple_ops_keys simple_ops_server_workload_*
 	@$(BUILD_DIR)/tests/simple_ops_client simple_ops_keys $(2) $(3) 2>&1 | tail -1
-	@$(BUILD_DIR)/tests/simple_ops_server simple_ops_keys $(1) 2>&1 | grep -E "Complete:|ERROR" | head -3 || true
+	@$(BUILD_DIR)/tests/simple_ops_server simple_ops_keys $(1) --no-ring-dim-check 2>&1 | grep -E "Complete:|ERROR" | head -3 || true
 	@echo "  -- primary decrypt --"
 	@$(BUILD_DIR)/tests/simple_ops_decrypt simple_ops_keys $(1) ct_result.bin 2>&1 | grep -E "PASS|FAIL"
 	@echo "  -- fhetch_driver (secondary) --"
 	@WORKLOAD_DIR=$$(ls -d simple_ops_server_workload_simple_ops_op_$(1) 2>/dev/null || true); \
 	 if [ -z "$$WORKLOAD_DIR" ]; then echo "  [SKIP] no workload dir"; exit 0; fi; \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim 2048 \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim 2048 --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc simple_ops_keys/cc.bin \
 	     --output-ct result:simple_ops_keys/ct_result_secondary.bin 2>&1 \
@@ -292,14 +292,14 @@ test-roundtrip-bootstrap-release: build-release ## Full roundtrip for bootstrap 
 	@echo "=== Bootstrap client ==="
 	$(BUILD_DIR)/tests/bootstrap_client bootstrap_keys
 	@echo "=== Bootstrap server ==="
-	$(BUILD_DIR)/tests/bootstrap_server bootstrap_keys
+	$(BUILD_DIR)/tests/bootstrap_server bootstrap_keys --no-ring-dim-check
 	@echo "=== Bootstrap primary decrypt ==="
 	$(BUILD_DIR)/tests/bootstrap_decrypt bootstrap_keys ct_result.bin
 	@echo "=== Bootstrap fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d bootstrap_server_workload_* 2>/dev/null); \
-	 N=$$($(BUILD_DIR)/tests/bootstrap_server bootstrap_keys 2>&1 | grep -oP 'Ring dimension:\s*\K[0-9]+' | head -1); \
+	 N=$$($(BUILD_DIR)/tests/bootstrap_server bootstrap_keys --no-ring-dim-check 2>&1 | grep -oP 'Ring dimension:\s*\K[0-9]+' | head -1); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $${N:-2048} \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $${N:-2048} --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc bootstrap_keys/cc.bin \
 	     --output-ct output_cipher:bootstrap_keys/ct_result_secondary.bin
@@ -312,14 +312,14 @@ test-roundtrip-plaintext-add-release: build-release ## Full roundtrip for plaint
 	@echo "=== Plaintext-Add client ==="
 	$(BUILD_DIR)/tests/plaintext_add_client plaintext_add_keys
 	@echo "=== Plaintext-Add server ==="
-	$(BUILD_DIR)/tests/plaintext_add_server plaintext_add_keys
+	$(BUILD_DIR)/tests/plaintext_add_server plaintext_add_keys --no-ring-dim-check
 	@echo "=== Plaintext-Add primary decrypt ==="
 	$(BUILD_DIR)/tests/plaintext_add_decrypt plaintext_add_keys ct_result.bin
 	@echo "=== Plaintext-Add fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d plaintext_add_server_workload_* 2>/dev/null); \
-	 N=$$($(BUILD_DIR)/tests/plaintext_add_server plaintext_add_keys 2>&1 | grep -oP 'Ring dimension:\s*\K[0-9]+' | head -1); \
+	 N=$$($(BUILD_DIR)/tests/plaintext_add_server plaintext_add_keys --no-ring-dim-check 2>&1 | grep -oP 'Ring dimension:\s*\K[0-9]+' | head -1); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $${N:-2048} \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $${N:-2048} --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc plaintext_add_keys/cc.bin \
 	     --output-ct output_cipher:plaintext_add_keys/ct_result_secondary.bin
