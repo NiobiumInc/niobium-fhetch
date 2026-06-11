@@ -180,6 +180,7 @@ template<>
 void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
     const lbcrypto::CryptoContext<DCRTPoly>& cc) {
     uint64_t rd = cc->GetRingDimension();
+
     set_ring_dimension(rd);
 
     // Extract crypto parameters
@@ -196,8 +197,9 @@ void Compiler::capture_crypto_context<lbcrypto::CryptoContext<DCRTPoly>>(
 
     // Modulus chain
     std::vector<uint64_t> modulus_chain;
-    for (const auto& p : elemParams->GetParams())
+    for (const auto& p : elemParams->GetParams()){
         modulus_chain.push_back(p->GetModulus().ConvertToInt());
+    }
 
     uint32_t depth = static_cast<uint32_t>(!modulus_chain.empty() ? modulus_chain.size() - 1 : 0);
 
