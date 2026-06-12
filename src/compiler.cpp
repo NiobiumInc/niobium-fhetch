@@ -1112,6 +1112,10 @@ bool Compiler::run_local_fhetch_driver() {
         "--source-dir", dir.string(),
         "--cc", cc_path,
     };
+    // Propagate the hardware-compatibility check opt-outs to the spawned
+    // driver, which runs its own init()/set_ring_dimension().
+    if (!impl_->check_ring_dim) args.push_back("--no-ring-dim-check");
+    if (!impl_->check_primes)   args.push_back("--no-prime-check");
     for (const auto& name : output_names) {
         args.push_back("--output-ct");
         args.push_back(name + ":" + (probes_dir / (name + ".ct")).string());
