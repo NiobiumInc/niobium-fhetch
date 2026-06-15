@@ -5,6 +5,7 @@
 
 #include "local_replay.h"
 
+#include "niobium/fhetch_parser.h"  // DriveInputs (used directly below)
 #include "niobium/fhetch_sim/simulator.h"
 
 #include "openfhe.h"

@@ -998,17 +998,8 @@ static std::string env_or(const char* name, const char* fallback) {
     return (v != nullptr && *v != '\0') ? std::string(v) : std::string(fallback);
 }
 
-// niobium_hw is project-intrinsic (recorded into fhetch_replay.json), so
-// replay_project reads it from the on-disk project rather than impl_ state.
-static bool read_project_niobium_hw(const std::filesystem::path& dir) {
-    std::ifstream ifs(dir / "fhetch_replay.json");
-    if (!ifs.is_open()) return false;
-    auto j = nlohmann::json::parse(ifs, nullptr, /*allow_exceptions=*/false);
-    return !j.is_discarded() && j.value("niobium_hw", false);
-}
-
 bool Compiler::replay_project(const std::string& target, const std::filesystem::path& dir,
-                              const std::string& opt_level) {
+                              const std::string& opt_level, bool niobium_hw) {
     // Build the worker command. "local" runs the bundled, open fhetch_sim (no
     // compiler dependency); any other target forwards the project to the
     // compiler-side nbcc_fhetch_replay. posix_spawnp with explicit argv (rather
@@ -1021,9 +1012,10 @@ bool Compiler::replay_project(const std::string& target, const std::filesystem::
     } else {
         exec = env_or("NBCC_FHETCH_REPLAY", "nbcc_fhetch_replay");
         args = {exec, "--project=" + dir.string(), "--target=" + target};
-        // Hardware format is project-intrinsic; opt-level is a replay-time
-        // choice forwarded only when non-default (so the O0 argv is unchanged).
-        if (read_project_niobium_hw(dir)) args.emplace_back("--niobium_hw");
+        // Hardware format (--niobium_hw = montgomery + bit_reversal) and opt-level
+        // are replay-time choices, forwarded only when set / non-default so the
+        // ordinary-O0 argv is unchanged.
+        if (niobium_hw) args.emplace_back("--niobium_hw");
         if (opt_level != "O0") args.push_back("--opt-level=" + opt_level);
     }
 
@@ -1076,7 +1068,10 @@ bool Compiler::replay_project(const std::string& target, const std::filesystem::
 }
 
 bool Compiler::dispatch_to_compiler_target() {
-    return replay_project(impl_->target, get_program_directory(), impl_->opt_level);
+    // Forward the full hardware format only when both modes are on, matching the
+    // pre-refactor behavior; replay()'s guard already rejected partial toggles.
+    return replay_project(impl_->target, get_program_directory(), impl_->opt_level,
+                          impl_->montgomery_mode && impl_->bitrev_mode);
 }
 
 bool Compiler::run_local_fhetch_driver() {
@@ -1216,10 +1211,6 @@ void Compiler::write_replay_json() {
     }
     cc["is_valid"] = true;
     replay["crypto_context"] = cc;
-
-    // Hardware format is project-intrinsic — record it so a singleton-free
-    // replay_project() can decide whether to forward --niobium_hw.
-    replay["niobium_hw"] = impl_->montgomery_mode && impl_->bitrev_mode;
 
     // ---- files ----
     json files;
