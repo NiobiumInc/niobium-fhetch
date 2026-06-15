@@ -9,6 +9,7 @@
 // stubs so that the instrumented OpenFHE links and the probes fire.
 
 #include "niobium/compiler.h"
+#include "local_replay.h"
 
 #include "openfhe.h"
 #include "ciphertext-ser.h"
@@ -1163,7 +1164,7 @@ static void apply_sim_output(lbcrypto::NativePoly& native_poly, const ComputedEl
     native_poly.SetValues(std::move(nv), fmt);
 }
 
-void Compiler::reconstruct_probes() const {
+void reconstruct_probes_in(const std::filesystem::path& dir) {
     // Re-entry guard. The Serial::{De,}SerializeFromFile calls below fire
     // the auto-facade's on_{de,}serialize_ciphertext hooks, which in turn
     // call probe() / ensure_replayed() → back into this code. Use the
@@ -1172,7 +1173,6 @@ void Compiler::reconstruct_probes() const {
     g_in_probe = true;
     struct Guard { ~Guard() { g_in_probe = false; } } guard;
 
-    auto dir = get_program_directory();
     auto templates_dir = dir / "ciphertext_templates";
     auto serialized_dir = dir / "serialized_probes";
     auto outputs_path = dir / "fhetch_replay_outputs.json";
@@ -1256,6 +1256,10 @@ void Compiler::reconstruct_probes() const {
                       << e.what() << std::endl;
         }
     }
+}
+
+void Compiler::reconstruct_probes() const {
+    reconstruct_probes_in(get_program_directory());
 }
 
 // ============================================================================

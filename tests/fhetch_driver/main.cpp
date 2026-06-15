@@ -31,6 +31,7 @@
 //     binary can then verify the secondary ct matches the expected value.
 
 #include "openfhe.h"
+#include "local_replay.h"
 #include "niobium/compiler.h"
 #include "niobium/fhetch_parser.h"
 
@@ -40,7 +41,6 @@
 #include "scheme/ckksrns/ckksrns-ser.h"
 
 #include <nlohmann/json.hpp>
-#include <cereal/archives/portable_binary.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -59,231 +59,9 @@ using namespace lbcrypto;
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Read a .ids file written by niobium::cereal_io::write_addr_ids.
-// Layout: [uint64_t count][uint64_t id_0][uint64_t id_1]...
-static std::vector<uint64_t> read_ids(const fs::path& p) {
-    std::vector<uint64_t> v;
-    std::ifstream f(p, std::ios::binary);
-    if (!f.is_open()) return v;
-    uint64_t n = 0;
-    f.read(reinterpret_cast<char*>(&n), sizeof(n));
-    v.resize(n);
-    if (n) f.read(reinterpret_cast<char*>(v.data()), n * sizeof(uint64_t));
-    return v;
-}
-
-// Extract per-tower (addr, values, modulus) triples from a DCRTPoly.
-// The .ids file provides the FHETCH address for each tower in order.
-static void extract_dcrt_towers(
-    const DCRTPoly& dcrt,
-    std::vector<uint64_t>::const_iterator& id_it,
-    std::vector<uint64_t>::const_iterator id_end,
-    niobium::fhetch::DriveInputs& inputs) {
-
-    for (const auto& tower : dcrt.GetAllElements()) {
-        if (id_it == id_end) return;
-        uint64_t addr = *id_it++;
-        uint64_t modulus = tower.GetModulus().ConvertToInt();
-        const auto& vals = tower.GetValues();
-        std::vector<uint64_t> out(vals.GetLength());
-        for (size_t i = 0; i < vals.GetLength(); ++i)
-            out[i] = vals[i].ConvertToInt();
-        inputs.data[addr] = {std::move(out), modulus};
-    }
-}
-
-// Read a .input_NAME.bin file written by auto_facade's tag_input. Layout is:
-//   uint32_t instances_count
-//   uint8_t  payload_type  (1 = ciphertext)
-//   uint32_t num_dcrt_polys
-//   DCRTPoly * num_dcrt_polys   (cereal-serialized)
-static bool load_input_bin(const fs::path& bin_path,
-                           const std::vector<uint64_t>& ids,
-                           niobium::fhetch::DriveInputs& inputs) {
-    std::ifstream f(bin_path, std::ios::binary);
-    if (!f.is_open()) return false;
-    try {
-        cereal::PortableBinaryInputArchive ar(f);
-        uint32_t instances = 0;
-        uint8_t  payload_type = 0;
-        uint32_t num_polys = 0;
-        ar(instances);
-        ar(payload_type);
-        ar(num_polys);
-
-        auto id_it = ids.begin();
-        for (uint32_t i = 0; i < num_polys; ++i) {
-            DCRTPoly dcrt;
-            ar(dcrt);
-            extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[fhetch_driver] failed to read " << bin_path
-                  << ": " << e.what() << std::endl;
-        return false;
-    }
-    return true;
-}
-
-// Read a key .mk.bin / .rk.bin file written by auto_facade's
-// serialize_eval_keys. Layout is:
-//   uint32_t num_keys
-//   for each key:
-//     uint32_t av_size;  DCRTPoly * av_size
-//     uint32_t bv_size;  DCRTPoly * bv_size
-// The .ids file lists FHETCH addresses flattened across all keys' (A, B)
-// DCRTPoly towers, in the same order as serialization.
-static bool load_key_bin(const fs::path& bin_path,
-                         const std::vector<uint64_t>& ids,
-                         niobium::fhetch::DriveInputs& inputs) {
-    std::ifstream f(bin_path, std::ios::binary);
-    if (!f.is_open()) return false;
-    try {
-        cereal::PortableBinaryInputArchive ar(f);
-        uint32_t num_keys = 0;
-        ar(num_keys);
-        auto id_it = ids.begin();
-        for (uint32_t k = 0; k < num_keys; ++k) {
-            uint32_t av_size = 0;
-            ar(av_size);
-            for (uint32_t i = 0; i < av_size; ++i) {
-                DCRTPoly dcrt;
-                ar(dcrt);
-                extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
-            }
-            uint32_t bv_size = 0;
-            ar(bv_size);
-            for (uint32_t i = 0; i < bv_size; ++i) {
-                DCRTPoly dcrt;
-                ar(dcrt);
-                extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
-            }
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[fhetch_driver] failed to read " << bin_path
-                  << ": " << e.what() << std::endl;
-        return false;
-    }
-    return true;
-}
-
-// Read a .bp.bin file written by auto_facade's tag_bootstrap_precompute.
-// Layout (matches the writer in src/auto_facade.cpp):
-//   uint32_t num_boot_entries
-//   for each entry:
-//     uint32_t m_slots
-//     uint32_t m_dim1
-//     2 x (9 x uint32_t)   // m_paramsEnc, m_paramsDec
-//     2 x 2D-DCRTPoly      // m_U0hatTPreFFT, m_U0PreFFT
-//     2 x 1D-DCRTPoly      // m_U0Pre, m_U0hatTPre
-// 2D layout: uint32 outer_size; per inner: uint32 inner_size, DCRTPoly...
-// 1D layout: uint32 size; DCRTPoly...
-static bool load_bp_bin(const fs::path& bin_path,
-                        const std::vector<uint64_t>& ids,
-                        niobium::fhetch::DriveInputs& inputs) {
-    std::ifstream f(bin_path, std::ios::binary);
-    if (!f.is_open()) return false;
-    try {
-        cereal::PortableBinaryInputArchive ar(f);
-        uint32_t num_entries = 0;
-        ar(num_entries);
-        auto id_it = ids.begin();
-        for (uint32_t e = 0; e < num_entries; ++e) {
-            uint32_t m_slots = 0, m_dim1 = 0;
-            ar(m_slots);
-            ar(m_dim1);
-            for (int p = 0; p < 2; ++p) {
-                uint32_t lvlb, layersCollapse, remCollapse, numRotations,
-                         b, g, numRotationsRem, bRem, gRem;
-                ar(lvlb, layersCollapse, remCollapse, numRotations,
-                   b, g, numRotationsRem, bRem, gRem);
-            }
-            auto read_2d = [&]() {
-                uint32_t outer_size = 0;
-                ar(outer_size);
-                for (uint32_t i = 0; i < outer_size; ++i) {
-                    uint32_t inner_size = 0;
-                    ar(inner_size);
-                    for (uint32_t j = 0; j < inner_size; ++j) {
-                        DCRTPoly dcrt;
-                        ar(dcrt);
-                        extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
-                    }
-                }
-            };
-            auto read_1d = [&]() {
-                uint32_t size = 0;
-                ar(size);
-                for (uint32_t i = 0; i < size; ++i) {
-                    DCRTPoly dcrt;
-                    ar(dcrt);
-                    extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
-                }
-            };
-            read_2d();   // m_U0hatTPreFFT
-            read_2d();   // m_U0PreFFT
-            read_1d();   // m_U0Pre
-            read_1d();   // m_U0hatTPre
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[fhetch_driver] failed to read " << bin_path
-                  << ": " << e.what() << std::endl;
-        return false;
-    }
-    return true;
-}
-
-// Load all inputs listed in source_dir/<program>.inputs.json, reading the
-// companion .bin/.ids pairs. Populates the DriveInputs map keyed by the
-// FHETCH addresses recorded in the .ids files (i.e. the same addresses that
-// appear in the .fhetch trace).
-static bool load_source_inputs(const fs::path& source_dir,
-                               const std::string& program_name,
-                               niobium::fhetch::DriveInputs& inputs) {
-    fs::path idx_path = source_dir / (program_name + ".inputs.json");
-    if (!fs::exists(idx_path)) return true;  // nothing to load is OK
-
-    nlohmann::json j;
-    try {
-        std::ifstream in(idx_path);
-        in >> j;
-    } catch (...) {
-        std::cerr << "[fhetch_driver] failed to parse " << idx_path << std::endl;
-        return false;
-    }
-
-    if (!j.contains("inputs")) return true;
-    for (const auto& entry : j["inputs"]) {
-        std::string bin = entry.value("bin_file", "");
-        std::string ids = entry.value("ids_file", "");
-        if (bin.empty() || ids.empty()) continue;
-        fs::path bin_path = fs::path(bin).is_absolute() ? fs::path(bin) : source_dir / bin;
-        fs::path ids_path = fs::path(ids).is_absolute() ? fs::path(ids) : source_dir / ids;
-        if (!fs::exists(bin_path) || !fs::exists(ids_path)) continue;
-
-        auto addr_ids = read_ids(ids_path);
-        if (!load_input_bin(bin_path, addr_ids, inputs)) return false;
-    }
-    return true;
-}
-
-// Load keys (mk.bin, rk.bin, bp.bin) if present. mk/rk use the eval-key
-// layout (load_key_bin); bp uses a different precompute layout (load_bp_bin).
-static bool load_source_keys(const fs::path& source_dir,
-                             const std::string& program_name,
-                             niobium::fhetch::DriveInputs& inputs) {
-    auto load_with = [&](const std::string& base, auto&& reader) {
-        fs::path bin = source_dir / (program_name + "." + base + ".bin");
-        fs::path ids = source_dir / (program_name + "." + base + ".ids");
-        if (!fs::exists(bin) || !fs::exists(ids)) return;
-        auto addr_ids = read_ids(ids);
-        reader(bin, addr_ids, inputs);
-    };
-    load_with("mk", load_key_bin);
-    load_with("rk", load_key_bin);
-    load_with("bp", load_bp_bin);
-    return true;
-}
+// The input/key loaders (read_ids, extract_dcrt_towers, load_input_bin,
+// load_key_bin, load_bp_bin, load_source_inputs, load_source_keys) live in
+// src/local_replay.h so the project worker and this test share one copy.
 
 // Parse source_dir/<program>.outputs.json into a DriveOutputs map.
 // The JSON lists each output with its payload_type and a ciphertext_data
@@ -389,8 +167,8 @@ int main(int argc, char* argv[]) {
     if (!source_dir.empty()) {
         // Program name is the trace's stem.
         std::string program_name = trace_path.stem().string();
-        if (!load_source_inputs(source_dir, program_name, inputs)) return 2;
-        if (!load_source_keys(source_dir, program_name, inputs))   return 2;
+        if (!niobium::fhetch::load_source_inputs(source_dir, program_name, inputs)) return 2;
+        if (!niobium::fhetch::load_source_keys(source_dir, program_name, inputs))   return 2;
         if (!load_source_outputs(source_dir, program_name, outputs, output_names))
             return 2;
         std::cout << "[fhetch_driver] loaded " << inputs.data.size()
