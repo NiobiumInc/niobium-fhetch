@@ -991,6 +991,13 @@ bool Compiler::replay() {
 // The executable is located via:
 //   1. NBCC_FHETCH_REPLAY env var (absolute path, wins if set)
 //   2. PATH lookup for "nbcc_fhetch_replay"
+// Spawned-executable locator: the env var if set and non-empty, else the
+// PATH-resolved default name.
+static std::string env_or(const char* name, const char* fallback) {
+    const char* v = std::getenv(name);
+    return (v != nullptr && *v != '\0') ? std::string(v) : std::string(fallback);
+}
+
 // niobium_hw is project-intrinsic (recorded into fhetch_replay.json), so
 // replay_project reads it from the on-disk project rather than impl_ state.
 static bool read_project_niobium_hw(const std::filesystem::path& dir) {
@@ -1009,12 +1016,10 @@ bool Compiler::replay_project(const std::string& target, const std::filesystem::
     std::string exec;
     std::vector<std::string> args;
     if (target == "local") {
-        if (const char* env = std::getenv("NBCC_FHETCH_SIM")) exec = env;
-        else exec = "fhetch_sim";
+        exec = env_or("NBCC_FHETCH_SIM", "fhetch_sim");
         args = {exec, "--project=" + dir.string()};
     } else {
-        if (const char* env = std::getenv("NBCC_FHETCH_REPLAY")) exec = env;
-        else exec = "nbcc_fhetch_replay";
+        exec = env_or("NBCC_FHETCH_REPLAY", "nbcc_fhetch_replay");
         args = {exec, "--project=" + dir.string(), "--target=" + target};
         // Hardware format is project-intrinsic; opt-level is a replay-time
         // choice forwarded only when non-default (so the O0 argv is unchanged).
@@ -1078,9 +1083,7 @@ bool Compiler::run_local_fhetch_driver() {
     auto dir = get_program_directory();
     std::string prog = impl_->full_program_name();
 
-    std::string exec;
-    if (const char* env = std::getenv("NBCC_FHETCH_DRIVER")) exec = env;
-    else exec = "fhetch_driver";
+    std::string exec = env_or("NBCC_FHETCH_DRIVER", "fhetch_driver");
 
     auto probes_dir = dir / "serialized_probes";
     std::filesystem::create_directories(probes_dir);

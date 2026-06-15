@@ -1,15 +1,10 @@
 // Copyright 2024-present Niobium Microsystems, Inc.
 // Licensed under the Apache License, Version 2.0.
 //
-// run_local_replay_from_project — disk-driven local FHETCH replay. Reads a
-// project directory (trace, inputs/keys, outputs, templates) with no Compiler
-// singleton state, drives the simulator, and writes the same artifacts the
-// in-process Compiler::replay() local path does, so spawned workers can replay
-// concurrently without sharing OpenFHE's process-global transform caches.
+// Implementation of the disk-driven local replay declared in local_replay.h.
 
 #include "local_replay.h"
 
-#include "niobium/fhetch_parser.h"
 #include "niobium/fhetch_sim/simulator.h"
 
 #include "openfhe.h"
@@ -34,12 +29,9 @@
 namespace fs = std::filesystem;
 using DCRTPoly = lbcrypto::DCRTPoly;
 
-// ===========================================================================
-// Input/key loaders. Lifted verbatim from tests/fhetch_driver/main.cpp so the
-// worker and the (gated) fhetch_driver test share one copy of the OpenFHE-cereal
-// .bin/.ids layout that must track the auto_facade writers.
-// ===========================================================================
-
+// The .bin/.ids cereal loaders below are lifted verbatim from
+// tests/fhetch_driver/main.cpp so the worker and that (gated) test share one
+// copy of the on-disk layout, which must track the auto_facade writers.
 namespace {
 
 // .ids layout: [uint64_t count][uint64_t id_0]...
@@ -72,8 +64,8 @@ void extract_dcrt_towers(const DCRTPoly& dcrt,
     }
 }
 
-// .input_NAME.bin layout (auto_facade tag_input):
-//   uint32 instances; uint8 payload_type; uint32 num_polys; DCRTPoly * num_polys
+// .input_NAME.bin: uint32 instances; uint8 payload_type; uint32 num_polys;
+// DCRTPoly * num_polys.
 bool load_input_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
                     niobium::fhetch::DriveInputs& inputs) {
     std::ifstream f(bin_path, std::ios::binary);
@@ -100,9 +92,8 @@ bool load_input_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
     return true;
 }
 
-// .mk.bin / .rk.bin layout (auto_facade serialize_eval_keys):
-//   uint32 num_keys; per key: uint32 av_size, DCRTPoly*av_size, uint32 bv_size,
-//   DCRTPoly*bv_size. The .ids list flattens all keys' (A, B) towers in order.
+// .mk.bin / .rk.bin: uint32 num_keys; per key uint32 av_size, DCRTPoly*av_size,
+// uint32 bv_size, DCRTPoly*bv_size. The .ids flatten all keys' (A, B) towers.
 bool load_key_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
                   niobium::fhetch::DriveInputs& inputs) {
     std::ifstream f(bin_path, std::ios::binary);
@@ -135,9 +126,9 @@ bool load_key_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
     return true;
 }
 
-// .bp.bin layout (auto_facade tag_bootstrap_precompute): num_entries; per entry
-// m_slots, m_dim1, 2x(9 uint32 params), 2x 2D-DCRTPoly, 2x 1D-DCRTPoly.
-// 2D: uint32 outer; per inner: uint32 inner, DCRTPoly... | 1D: uint32 size, DCRTPoly...
+// .bp.bin: num_entries; per entry m_slots, m_dim1, 2x(9 uint32 params),
+// 2x 2D-DCRTPoly, 2x 1D-DCRTPoly. 2D: uint32 outer; per inner uint32 inner,
+// DCRTPoly... | 1D: uint32 size, DCRTPoly...
 bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
                  niobium::fhetch::DriveInputs& inputs) {
     std::ifstream f(bin_path, std::ios::binary);
@@ -179,10 +170,10 @@ bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
                     extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
                 }
             };
-            read_2d();   // m_U0hatTPreFFT
-            read_2d();   // m_U0PreFFT
-            read_1d();   // m_U0Pre
-            read_1d();   // m_U0hatTPre
+            read_2d();  // m_U0hatTPreFFT
+            read_2d();  // m_U0PreFFT
+            read_1d();  // m_U0Pre
+            read_1d();  // m_U0hatTPre
         }
     } catch (const std::exception& e) {
         std::cerr << "[fhetch_sim] failed to read " << bin_path << ": " << e.what() << std::endl;
@@ -193,18 +184,19 @@ bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
 
 }  // namespace
 
-namespace niobium::fhetch {
+namespace niobium {
+namespace fhetch {
 
 bool load_source_inputs(const fs::path& dir, const std::string& prog, DriveInputs& inputs) {
     fs::path idx_path = dir / (prog + ".inputs.json");
-    if (!fs::exists(idx_path)) return true;  // nothing to load is OK
+    if (!fs::exists(idx_path)) return true;  // a trace with no live-in inputs is fine
 
     nlohmann::json j;
     try {
         std::ifstream in(idx_path);
         in >> j;
-    } catch (...) {
-        std::cerr << "[fhetch_sim] failed to parse " << idx_path << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[fhetch_sim] failed to parse " << idx_path << ": " << e.what() << std::endl;
         return false;
     }
 
@@ -215,8 +207,11 @@ bool load_source_inputs(const fs::path& dir, const std::string& prog, DriveInput
         if (bin.empty() || ids.empty()) continue;
         fs::path bin_path = fs::path(bin).is_absolute() ? fs::path(bin) : dir / bin;
         fs::path ids_path = fs::path(ids).is_absolute() ? fs::path(ids) : dir / ids;
-        if (!fs::exists(bin_path) || !fs::exists(ids_path)) continue;
-
+        if (!fs::exists(bin_path) || !fs::exists(ids_path)) {
+            std::cerr << "[fhetch_sim] input " << entry.value("name", bin)
+                      << " references a missing .bin/.ids under " << dir << std::endl;
+            return false;
+        }
         auto addr_ids = read_ids(ids_path);
         if (!load_input_bin(bin_path, addr_ids, inputs)) return false;
     }
@@ -224,91 +219,171 @@ bool load_source_inputs(const fs::path& dir, const std::string& prog, DriveInput
 }
 
 bool load_source_keys(const fs::path& dir, const std::string& prog, DriveInputs& inputs) {
-    auto load_with = [&](const std::string& base, auto&& reader) {
+    // mk/rk/bp are each optional; a present file that fails to load is an error.
+    auto load_with = [&](const std::string& base, auto&& reader) -> bool {
         fs::path bin = dir / (prog + "." + base + ".bin");
         fs::path ids = dir / (prog + "." + base + ".ids");
-        if (!fs::exists(bin) || !fs::exists(ids)) return;
+        if (!fs::exists(bin) || !fs::exists(ids)) return true;
         auto addr_ids = read_ids(ids);
-        reader(bin, addr_ids, inputs);
+        return reader(bin, addr_ids, inputs);
     };
-    load_with("mk", load_key_bin);
-    load_with("rk", load_key_bin);
-    load_with("bp", load_bp_bin);
-    return true;
+    return load_with("mk", load_key_bin) && load_with("rk", load_key_bin) &&
+           load_with("bp", load_bp_bin);
 }
 
-}  // namespace niobium::fhetch
+}  // namespace fhetch
 
-namespace niobium {
+namespace {
 
-bool run_local_replay_from_project(const fs::path& project_dir) {
-    using json = nlohmann::json;
+using NamedOutput = std::pair<std::string, std::vector<uint64_t>>;
 
-    if (!fs::is_directory(project_dir)) {
-        std::cerr << "[fhetch_sim] not a directory: " << project_dir << std::endl;
+struct ProjectIndex {
+    uint64_t ring_dim = 0;
+    std::string trace_file;  // filename, relative to the project dir
+    std::string prog;        // trace stem, prefixes the per-input/-output files
+};
+
+// Read ring dimension + trace filename from fhetch_replay.json.
+bool read_project_index(const fs::path& dir, ProjectIndex& out) {
+    std::ifstream in(dir / "fhetch_replay.json");
+    if (!in.is_open()) {
+        std::cerr << "[fhetch_sim] missing fhetch_replay.json in " << dir << std::endl;
         return false;
     }
-
-    // ---- Project index: ring dimension + trace filename ----
-    std::ifstream index_in(project_dir / "fhetch_replay.json");
-    if (!index_in.is_open()) {
-        std::cerr << "[fhetch_sim] missing fhetch_replay.json in " << project_dir << std::endl;
+    auto j = nlohmann::json::parse(in, nullptr, /*allow_exceptions=*/false);
+    if (j.is_discarded() || !j.contains("crypto_context") || !j.contains("files")) {
+        std::cerr << "[fhetch_sim] malformed fhetch_replay.json in " << dir << std::endl;
         return false;
     }
-    json index = json::parse(index_in, nullptr, false);
-    if (index.is_discarded() || !index.contains("crypto_context") || !index.contains("files")) {
-        std::cerr << "[fhetch_sim] malformed fhetch_replay.json" << std::endl;
-        return false;
-    }
-    uint64_t ring_dim = index["crypto_context"].value("ring_dimension", uint64_t{0});
-    std::string trace_file = index["files"].value("instructions", std::string{});
-    if (ring_dim == 0 || trace_file.empty()) {
+    out.ring_dim = j["crypto_context"].value("ring_dimension", uint64_t{0});
+    out.trace_file = j["files"].value("instructions", std::string{});
+    if (out.ring_dim == 0 || out.trace_file.empty()) {
         std::cerr << "[fhetch_sim] fhetch_replay.json lacks ring_dimension or instructions"
                   << std::endl;
         return false;
     }
-    std::string prog = fs::path(trace_file).stem().string();
+    out.prog = fs::path(out.trace_file).stem().string();
+    return true;
+}
 
-    // ---- Build + load the simulator ----
-    fhetch_sim::Simulator sim;
-    sim.set_ring_dimension(ring_dim);
-    if (!sim.load_trace(project_dir / trace_file)) {
-        std::cerr << "[fhetch_sim] failed to load trace " << trace_file << std::endl;
+// Load every recorded input + key into the simulator at its recorded address.
+// Inputs sit at their live-in addresses, so the in-process copy-lineage
+// fixpoint is unnecessary here.
+bool populate_inputs(const fs::path& dir, const std::string& prog, fhetch_sim::Simulator& sim) {
+    fhetch::DriveInputs inputs;
+    if (!fhetch::load_source_inputs(dir, prog, inputs)) {
+        std::cerr << "[fhetch_sim] failed to load inputs for " << prog << std::endl;
         return false;
     }
-
-    // ---- Populate inputs + keys. Each input is recorded at its live-in
-    //      address (.ids), so the in-process copy-lineage fixpoint is moot. ----
-    fhetch::DriveInputs inputs;
-    if (!fhetch::load_source_inputs(project_dir, prog, inputs) ||
-        !fhetch::load_source_keys(project_dir, prog, inputs)) {
+    if (!fhetch::load_source_keys(dir, prog, inputs)) {
+        std::cerr << "[fhetch_sim] failed to load keys for " << prog << std::endl;
         return false;
     }
     for (const auto& [addr, elem] : inputs.data)
         sim.store_polynomial(addr, elem.values, elem.modulus);
+    return true;
+}
 
-    // ---- Output probe names + addr_ids, in the recorded array order ----
-    std::vector<std::pair<std::string, std::vector<uint64_t>>> outputs;
-    {
-        std::ifstream out_in(project_dir / (prog + ".outputs.json"));
-        if (out_in.is_open()) {
-            json oj = json::parse(out_in, nullptr, false);
-            if (!oj.is_discarded() && oj.contains("outputs")) {
-                for (const auto& out : oj["outputs"]) {
-                    std::string name = out.value("name", std::string{});
-                    if (name.empty() || !out.contains("ciphertext_data")) continue;
-                    std::vector<uint64_t> addr_ids;
-                    for (const auto& poly : out["ciphertext_data"]) {
-                        if (!poly.contains("elements")) continue;
-                        for (const auto& elem : poly["elements"])
-                            addr_ids.push_back(elem.get<uint64_t>());
-                    }
-                    outputs.emplace_back(std::move(name), std::move(addr_ids));
-                }
-            }
+// Output probe names + addr_ids in recorded array order, from <prog>.outputs.json.
+bool read_output_probes(const fs::path& dir, const std::string& prog,
+                        std::vector<NamedOutput>& out) {
+    std::ifstream in(dir / (prog + ".outputs.json"));
+    if (!in.is_open()) {
+        std::cerr << "[fhetch_sim] missing " << prog << ".outputs.json in " << dir << std::endl;
+        return false;
+    }
+    auto j = nlohmann::json::parse(in, nullptr, /*allow_exceptions=*/false);
+    if (j.is_discarded() || !j.contains("outputs")) {
+        std::cerr << "[fhetch_sim] malformed " << prog << ".outputs.json in " << dir << std::endl;
+        return false;
+    }
+    for (const auto& o : j["outputs"]) {
+        std::string name = o.value("name", std::string{});
+        if (name.empty() || !o.contains("ciphertext_data")) continue;
+        std::vector<uint64_t> addr_ids;
+        for (const auto& poly : o["ciphertext_data"])
+            for (const auto& e : poly.value("elements", nlohmann::json::array()))
+                addr_ids.push_back(e.get<uint64_t>());
+        out.emplace_back(std::move(name), std::move(addr_ids));
+    }
+    return true;
+}
+
+// Write fhetch_replay_outputs.json exactly as Compiler::write_replay_outputs:
+// the simulator's per-tower modulus (the COPY_MODULUS sentinel for ops that
+// carry none, e.g. sr_automorph_eval) and computed values.
+bool write_replay_outputs(const fs::path& dir, const std::vector<NamedOutput>& outputs,
+                          const fhetch_sim::Simulator& sim) {
+    constexpr uint64_t kCopyModulus = 0xFFFFFFFFFFFFFFFFULL;
+    nlohmann::json root;
+    nlohmann::json outputs_arr = nlohmann::json::array();
+    for (const auto& [name, addr_ids] : outputs) {
+        nlohmann::json out_entry;
+        out_entry["name"] = name;
+        nlohmann::json elems_arr = nlohmann::json::array();
+        for (uint64_t addr : addr_ids) {
+            auto values = sim.get_polynomial(addr);
+            uint64_t modulus = sim.get_modulus(addr);
+            nlohmann::json elem;
+            elem["addr_id"] = addr;
+            elem["modulus"] = (modulus == 0) ? kCopyModulus : modulus;
+            elem["status"] = values.empty() ? "missing" : "computed";
+            elem["values"] = values;
+            elems_arr.push_back(elem);
         }
+        out_entry["elements"] = elems_arr;
+        outputs_arr.push_back(out_entry);
+    }
+    root["outputs"] = outputs_arr;
+    std::ofstream out(dir / "fhetch_replay_outputs.json");
+    if (!out.is_open()) {
+        std::cerr << "[fhetch_sim] failed to write fhetch_replay_outputs.json in " << dir
+                  << std::endl;
+        return false;
+    }
+    out << root.dump(2) << std::endl;
+    return true;
+}
+
+// Register the project CryptoContext so the reconstructed ciphertexts bind to
+// the full modulus chain, matching the in-process path byte-for-byte.
+bool register_crypto_context(const fs::path& dir) {
+    auto cc_path = dir / "cryptocontext.dat";
+    if (!fs::exists(cc_path)) {
+        std::cerr << "[fhetch_sim] missing cryptocontext.dat in " << dir << std::endl;
+        return false;
+    }
+    lbcrypto::CryptoContext<DCRTPoly> cc;
+    if (!lbcrypto::Serial::DeserializeFromFile(cc_path.string(), cc, lbcrypto::SerType::BINARY)) {
+        std::cerr << "[fhetch_sim] failed to load cryptocontext.dat in " << dir << std::endl;
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+bool run_local_replay_from_project(const fs::path& dir) {
+    if (!fs::is_directory(dir)) {
+        std::cerr << "[fhetch_sim] not a directory: " << dir << std::endl;
+        return false;
     }
 
+    ProjectIndex idx;
+    if (!read_project_index(dir, idx)) return false;
+
+    fhetch_sim::Simulator sim;
+    sim.set_ring_dimension(idx.ring_dim);
+    if (!sim.load_trace(dir / idx.trace_file)) {
+        std::cerr << "[fhetch_sim] failed to load trace " << idx.trace_file << std::endl;
+        return false;
+    }
+    if (!populate_inputs(dir, idx.prog, sim)) return false;
+
+    std::vector<NamedOutput> outputs;
+    if (!read_output_probes(dir, idx.prog, outputs)) return false;
+
+    // Pin every output address so liveness leaves it in memory for readback.
     std::vector<uint64_t> live_out;
     for (const auto& [name, addr_ids] : outputs)
         live_out.insert(live_out.end(), addr_ids.begin(), addr_ids.end());
@@ -323,58 +398,14 @@ bool run_local_replay_from_project(const fs::path& project_dir) {
     std::cout << "[fhetch_sim] replay complete: " << result.instructions_executed
               << " instructions, " << result.elapsed_seconds << "s" << std::endl;
 
-    // ---- fhetch_replay_outputs.json, matching Compiler::write_replay_outputs:
-    //      use the simulator's per-tower modulus, COPY_MODULUS for ops that
-    //      carry none (e.g. sr_automorph_eval, which the sim stores as 0). ----
-    constexpr uint64_t COPY_MODULUS = 0xFFFFFFFFFFFFFFFFULL;
-    json root;
-    json outputs_arr = json::array();
-    for (const auto& [name, addr_ids] : outputs) {
-        json out_entry;
-        out_entry["name"] = name;
-        json elems_arr = json::array();
-        for (uint64_t addr : addr_ids) {
-            auto values = sim.get_polynomial(addr);
-            uint64_t modulus = sim.get_modulus(addr);
-            json elem;
-            elem["addr_id"] = addr;
-            elem["modulus"] = (modulus == 0) ? COPY_MODULUS : modulus;
-            elem["status"] = values.empty() ? "missing" : "computed";
-            elem["values"] = values;
-            elems_arr.push_back(elem);
-        }
-        out_entry["elements"] = elems_arr;
-        outputs_arr.push_back(out_entry);
-    }
-    root["outputs"] = outputs_arr;
-    {
-        std::ofstream out(project_dir / "fhetch_replay_outputs.json");
-        if (!out.is_open()) {
-            std::cerr << "[fhetch_sim] failed to write fhetch_replay_outputs.json" << std::endl;
-            return false;
-        }
-        out << root.dump(2) << std::endl;
-    }
+    if (!write_replay_outputs(dir, outputs, sim)) return false;
+    if (!register_crypto_context(dir)) return false;
+    reconstruct_probes_in(dir);
 
-    // ---- Register the project's CryptoContext so the templates reconstructed
-    //      below bind to the full modulus chain, matching the in-process path
-    //      (whose CC is already registered) byte-for-byte. ----
-    {
-        lbcrypto::CryptoContext<DCRTPoly> cc;
-        auto cc_path = project_dir / "cryptocontext.dat";
-        if (fs::exists(cc_path) &&
-            !lbcrypto::Serial::DeserializeFromFile(cc_path.string(), cc, lbcrypto::SerType::BINARY)) {
-            std::cerr << "[fhetch_sim] failed to load cryptocontext.dat" << std::endl;
-            return false;
-        }
-    }
-
-    // ---- Reconstruct serialized_probes/<name>.ct from the templates ----
-    reconstruct_probes_in(project_dir);
-
-    fs::path probes_dir = project_dir / "serialized_probes";
+    auto probes_dir = dir / "serialized_probes";
     if (!fs::exists(probes_dir) || fs::is_empty(probes_dir)) {
-        std::cerr << "[fhetch_sim] no probes produced" << std::endl;
+        std::cerr << "[fhetch_sim] reconstruction produced no probes in " << probes_dir
+                  << std::endl;
         return false;
     }
     return true;
