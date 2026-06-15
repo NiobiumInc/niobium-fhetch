@@ -354,6 +354,10 @@ bool register_crypto_context(const fs::path& dir) {
         std::cerr << "[fhetch_sim] missing cryptocontext.dat in " << dir << std::endl;
         return false;
     }
+    // `cc` is intentionally discarded: deserializing registers it in OpenFHE's
+    // global CryptoContextFactory (which retains it), and that registration —
+    // not the local — is what reconstruct_probes_in's template deserialize binds
+    // to. Do not "clean up" this unused local.
     lbcrypto::CryptoContext<DCRTPoly> cc;
     if (!lbcrypto::Serial::DeserializeFromFile(cc_path.string(), cc, lbcrypto::SerType::BINARY)) {
         std::cerr << "[fhetch_sim] failed to load cryptocontext.dat in " << dir << std::endl;
