@@ -462,13 +462,6 @@ bool result(const std::string& name, MRP& m);
 /// @return true if the result was found and populated successfully.
 bool result(const std::string& name, MRPArray& arr);
 
-/// Directory-explicit, singleton-free variants of result() for concurrent
-/// collect: read <dir>/serialized_probes/<name>.ct directly, consulting no
-/// Compiler-singleton state, so N replays into distinct dirs can be collected
-/// concurrently. result(name, ...) is result_from(<program_dir>, name, ...).
-bool result_from(const std::filesystem::path& dir, const std::string& name, Polynomial& p);
-bool result_from(const std::filesystem::path& dir, const std::string& name, MRP& m);
-
 // ============================================================================
 //  BASELINE INSTRUCTIONS (required by all compliant hardware)
 // ============================================================================
