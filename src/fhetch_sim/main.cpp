@@ -16,38 +16,32 @@
 #include <string>
 
 int main(int argc, char* argv[]) {
-    // --project=<dir> / --project <dir>: replay an on-disk project, isolated per
-    // process so concurrent local replays don't share OpenFHE static caches.
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        std::string dir;
-        if (arg.rfind("--project=", 0) == 0) {
-            dir = arg.substr(std::strlen("--project="));
-        } else if (arg == "--project" && i + 1 < argc) {
-            dir = argv[i + 1];
-        } else {
-            continue;
-        }
-        if (dir.empty()) {
-            std::cerr << "[fhetch_sim] --project requires a directory" << std::endl;
-            return 1;
-        }
-        return niobium::run_local_replay_from_project(dir) ? 0 : 1;
-    }
-
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <trace.fhetch> [--ring-dim N]"
-                  << std::endl;
-        return 1;
-    }
-
-    std::string trace_file = argv[1];
+    std::string trace_file;
+    std::string project_dir;
     uint64_t ring_dim = 0;
 
-    for (int i = 2; i < argc; i++) {
-        if (std::strcmp(argv[i], "--ring-dim") == 0 && i + 1 < argc) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.rfind("--project=", 0) == 0) {
+            project_dir = arg.substr(std::strlen("--project="));
+        } else if (arg == "--project" && i + 1 < argc) {
+            project_dir = argv[++i];
+        } else if (arg == "--ring-dim" && i + 1 < argc) {
             ring_dim = std::stoull(argv[++i]);
+        } else if (trace_file.empty() && !arg.empty() && arg[0] != '-') {
+            trace_file = arg;
         }
+    }
+
+    // --project: replay an on-disk project, isolated per process so concurrent
+    // local replays don't share OpenFHE's static caches.
+    if (!project_dir.empty())
+        return niobium::run_local_replay_from_project(project_dir) ? 0 : 1;
+
+    if (trace_file.empty()) {
+        std::cerr << "Usage: " << argv[0]
+                  << " <trace.fhetch> --ring-dim N | --project <dir>" << std::endl;
+        return 1;
     }
 
     std::cout << "=== FHETCH Simulator ===" << std::endl;
