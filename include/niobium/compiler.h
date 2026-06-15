@@ -249,11 +249,12 @@ class Compiler {
     /// the bundled fhetch_sim --project=<dir> (located via NBCC_FHETCH_SIM, else
     /// "fhetch_sim" on PATH); for any other target forwards to nbcc_fhetch_replay
     /// --project=<dir> --target=<target>. Reads nothing from this Compiler — the
-    /// target/opt-level come from the call and the hardware format from
-    /// <dir>/fhetch_replay.json — so N threads may call it concurrently with
-    /// distinct dirs. opt_level forwards only for non-local targets.
+    /// target, opt-level, and hardware-format flag all come from the call — so N
+    /// threads may call it concurrently with distinct dirs. opt_level and
+    /// niobium_hw (the full montgomery + bit-reversal format, i.e. --niobium_hw)
+    /// forward only to non-local targets.
     bool replay_project(const std::string &target, const std::filesystem::path &dir,
-                        const std::string &opt_level = "O0");
+                        const std::string &opt_level = "O0", bool niobium_hw = false);
 
     /// Retrieve a hardware-computed result ciphertext after replay.
     /// @param cc       CryptoContext for result assembly.
