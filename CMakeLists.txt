@@ -56,10 +56,13 @@ set(OPENFHE_INCLUDE_DIRS
 set(OPENFHE_LIBRARY_PATH "${OPENFHE_INSTALL_DIR}/lib")
 
 if(NIOBIUM_FHETCH_OPENFHE_STATIC)
+  # Topological order (dependents first): pke depends on binfhe + core, binfhe
+  # on core. Required when an executable (e.g. fhetch_sim --project) pulls in
+  # pke's CryptoContext-deserialize/scheme-switching back-references to binfhe.
   set(OPENFHE_LIBRARIES
+      OPENFHEpke_static
       OPENFHEbinfhe_static
       OPENFHEcore_static
-      OPENFHEpke_static
   )
 else()
   set(OPENFHE_LIBRARIES
@@ -88,6 +91,7 @@ set(LIB_SOURCES
     src/fhetch_parser.cpp
     src/fhetch_sim/instruction.cpp
     src/fhetch_sim/simulator.cpp
+    src/local_replay.cpp
     src/probes.cpp
     src/trace_writer.cpp
 )
@@ -152,6 +156,8 @@ endif()
 if(WITH_FHETCH_SIM)
     add_executable(fhetch_sim src/fhetch_sim/main.cpp)
     target_link_libraries(fhetch_sim PRIVATE niobium_fhetch)
+    # local_replay.h (the --project worker entry point) lives under src/.
+    target_include_directories(fhetch_sim PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(APPLE)
       set_target_properties(fhetch_sim PROPERTIES
           BUILD_RPATH "@loader_path;${OPENFHE_LIBRARY_PATH}")
