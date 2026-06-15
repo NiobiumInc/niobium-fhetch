@@ -991,45 +991,45 @@ bool Compiler::replay() {
 // The executable is located via:
 //   1. NBCC_FHETCH_REPLAY env var (absolute path, wins if set)
 //   2. PATH lookup for "nbcc_fhetch_replay"
-bool Compiler::dispatch_to_compiler_target() {
-    auto dir = get_program_directory();
+// niobium_hw is project-intrinsic (recorded into fhetch_replay.json), so
+// replay_project reads it from the on-disk project rather than impl_ state.
+static bool read_project_niobium_hw(const std::filesystem::path& dir) {
+    std::ifstream ifs(dir / "fhetch_replay.json");
+    if (!ifs.is_open()) return false;
+    auto j = nlohmann::json::parse(ifs, nullptr, /*allow_exceptions=*/false);
+    return !j.is_discarded() && j.value("niobium_hw", false);
+}
+
+bool Compiler::replay_project(const std::string& target, const std::filesystem::path& dir,
+                              const std::string& opt_level) {
+    // Build the worker command. "local" runs the bundled, open fhetch_sim (no
+    // compiler dependency); any other target forwards the project to the
+    // compiler-side nbcc_fhetch_replay. posix_spawnp with explicit argv (rather
+    // than a shell string) avoids quoting hazards while preserving PATH lookup.
     std::string exec;
-    if (const char* env = std::getenv("NBCC_FHETCH_REPLAY")) {
-        exec = env;
+    std::vector<std::string> args;
+    if (target == "local") {
+        if (const char* env = std::getenv("NBCC_FHETCH_SIM")) exec = env;
+        else exec = "fhetch_sim";
+        args = {exec, "--project=" + dir.string()};
     } else {
-        exec = "nbcc_fhetch_replay";
+        if (const char* env = std::getenv("NBCC_FHETCH_REPLAY")) exec = env;
+        else exec = "nbcc_fhetch_replay";
+        args = {exec, "--project=" + dir.string(), "--target=" + target};
+        // Hardware format is project-intrinsic; opt-level is a replay-time
+        // choice forwarded only when non-default (so the O0 argv is unchanged).
+        if (read_project_niobium_hw(dir)) args.emplace_back("--niobium_hw");
+        if (opt_level != "O0") args.push_back("--opt-level=" + opt_level);
     }
 
-    // posix_spawnp with explicit argv (rather than std::system with a
-    // shell-escaped string) avoids quoting hazards in paths containing
-    // metacharacters; PATH lookup semantics are preserved.
-    std::string project_arg = "--project=" + dir.string();
-    std::string target_arg = "--target=" + impl_->target;
-    // The replay driver takes hardware mode from its own CLI (the FUNC_SIM
-    // device spec defaults montgomery_enabled=false), so forward the full
-    // hardware format explicitly. Partial combinations were already rejected
-    // by replay() before dispatch.
-    std::string hw_arg = "--niobium_hw";
-    const bool hw = impl_->montgomery_mode && impl_->bitrev_mode;
-    // Forward a non-default optimization level so it reaches the compiler-side
-    // replay (the forwarder turns it into an X-Opt-Level header; the server
-    // turns that into a native -O<n>). Omit at O0 so the default path's argv —
-    // and an old forwarder that ignores the flag — behave exactly as before.
-    std::string opt_arg = "--opt-level=" + impl_->opt_level;
-    const bool send_opt = (impl_->opt_level != "O0");
-    std::vector<char*> argv = {
-        const_cast<char*>(exec.c_str()),
-        project_arg.data(),
-        target_arg.data(),
-    };
-    if (hw) argv.push_back(hw_arg.data());
-    if (send_opt) argv.push_back(opt_arg.data());
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (auto& a : args) argv.push_back(const_cast<char*>(a.c_str()));
     argv.push_back(nullptr);
 
-    std::cout << "[NIOBIUM] Dispatching replay to compiler target '"
-              << impl_->target << "' via: " << exec << " "
-              << project_arg << " " << target_arg << (hw ? " --niobium_hw" : "")
-              << (send_opt ? " " + opt_arg : "") << std::endl;
+    std::cout << "[NIOBIUM] replay_project target '" << target << "' via:";
+    for (const auto& a : args) std::cout << ' ' << a;
+    std::cout << std::endl;
 
     pid_t pid = 0;
     int spawn_err = ::posix_spawnp(&pid, exec.c_str(), nullptr, nullptr,
@@ -1049,25 +1049,29 @@ bool Compiler::dispatch_to_compiler_target() {
                   << std::endl;
     }
     if (rc != 0) {
-        std::cerr << "[NIOBIUM] nbcc_fhetch_replay failed (exit " << rc
-                  << "). Is the binary on PATH, or NBCC_FHETCH_REPLAY set?"
+        std::cerr << "[NIOBIUM] " << exec << " failed (exit " << rc
+                  << "). Is the binary on PATH, or its locator env var set?"
                   << std::endl;
         return false;
     }
 
-    // At this point <program_dir>/serialized_probes/<name>.ct should exist
-    // for every probe. result<Ciphertext>() reads those directly.
+    // <dir>/serialized_probes/<name>.ct should now exist for every probe;
+    // result()/result_from() read those directly.
     auto probes_dir = dir / "serialized_probes";
     if (!std::filesystem::exists(probes_dir) ||
         std::filesystem::is_empty(probes_dir)) {
-        std::cerr << "[NIOBIUM] nbcc_fhetch_replay reported success but produced "
-                     "no serialized probes in " << probes_dir << std::endl;
+        std::cerr << "[NIOBIUM] " << exec << " reported success but produced no "
+                     "serialized probes in " << probes_dir << std::endl;
         return false;
     }
 
-    std::cout << "[NIOBIUM] Compiler-target replay complete. Probes in "
+    std::cout << "[NIOBIUM] replay_project complete. Probes in "
               << probes_dir << std::endl;
     return true;
+}
+
+bool Compiler::dispatch_to_compiler_target() {
+    return replay_project(impl_->target, get_program_directory(), impl_->opt_level);
 }
 
 bool Compiler::run_local_fhetch_driver() {
@@ -1209,6 +1213,10 @@ void Compiler::write_replay_json() {
     }
     cc["is_valid"] = true;
     replay["crypto_context"] = cc;
+
+    // Hardware format is project-intrinsic — record it so a singleton-free
+    // replay_project() can decide whether to forward --niobium_hw.
+    replay["niobium_hw"] = impl_->montgomery_mode && impl_->bitrev_mode;
 
     // ---- files ----
     json files;

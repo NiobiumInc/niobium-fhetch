@@ -244,6 +244,17 @@ class Compiler {
     /// @return true if replay succeeded with zero errors.
     bool replay();
 
+    /// Replay the on-disk project at `dir` to completion in a fresh subprocess,
+    /// writing serialized_probes/<name>.ct into `dir`. For target "local" spawns
+    /// the bundled fhetch_sim --project=<dir> (located via NBCC_FHETCH_SIM, else
+    /// "fhetch_sim" on PATH); for any other target forwards to nbcc_fhetch_replay
+    /// --project=<dir> --target=<target>. Reads nothing from this Compiler — the
+    /// target/opt-level come from the call and the hardware format from
+    /// <dir>/fhetch_replay.json — so N threads may call it concurrently with
+    /// distinct dirs. opt_level forwards only for non-local targets.
+    bool replay_project(const std::string &target, const std::filesystem::path &dir,
+                        const std::string &opt_level = "O0");
+
     /// Retrieve a hardware-computed result ciphertext after replay.
     /// @param cc       CryptoContext for result assembly.
     /// @param var_name Name of the output (as passed to probe()).
