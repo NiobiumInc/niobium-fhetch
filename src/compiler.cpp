@@ -977,22 +977,19 @@ bool Compiler::replay() {
 }
 
 // ============================================================================
-// dispatch_to_compiler_target — invoke nbcc_fhetch_replay for non-local targets
+// replay_project — spawn a fresh worker to replay an on-disk project
 // ============================================================================
 //
-// When the user passes --target=<value> (value != "local") to the client, we
-// skip the in-process FHETCH simulator and spawn the compiler-side driver.
-// The driver reads the recorded fhetch project, re-records it through the
-// full Niobium optimization pipeline, executes replay against the selected
-// target device, and writes ciphertext probes into <program_dir>/serialized_probes/.
-// result() on the client side reads from that same directory, so no further
-// plumbing is needed.
-//
-// The executable is located via:
-//   1. NBCC_FHETCH_REPLAY env var (absolute path, wins if set)
-//   2. PATH lookup for "nbcc_fhetch_replay"
-// Spawned-executable locator: the env var if set and non-empty, else the
-// PATH-resolved default name.
+// Singleton-free: target, opt-level, and the hardware-format flag come from the
+// call (nothing from impl_), so concurrent calls on distinct dirs are isolated.
+// "local" spawns the bundled open fhetch_sim --project=<dir>; any other target
+// forwards the project to the compiler-side nbcc_fhetch_replay --project=<dir>
+// --target=<target>, which runs the optimization pipeline and writes ciphertext
+// probes into <dir>/serialized_probes/ for result()/result_from() to read.
+// Each worker is located by its env var (else PATH name) via env_or.
+
+// Locator: the env var if set and non-empty, else the PATH-resolved default
+// (NBCC_FHETCH_SIM/NBCC_FHETCH_REPLAY/NBCC_FHETCH_DRIVER -> fhetch_sim/...).
 static std::string env_or(const char* name, const char* fallback) {
     const char* v = std::getenv(name);
     return (v != nullptr && *v != '\0') ? std::string(v) : std::string(fallback);
