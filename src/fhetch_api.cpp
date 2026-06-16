@@ -1089,19 +1089,23 @@ std::vector<Polynomial> prescale_by_q_hat(const MRP& x, const std::vector<uint64
 
 // Center scaled_i mod q_i (signed-preserving) and rebase to mod target_p.
 //
-// Emits the canonical 4-op muli/addi/muli/addi lowering in SSA form: each
-// op writes a fresh result address and reads the previous op's result, so
-// every address in the trace is defined exactly once (FHETCH traces are
-// canonically SSA; haze's other ops already are via make_result). The
-// recorded immediates are the ordinary-form ones — client traces are
-// always ordinary-form, and hardware-izing happens driver-side: the
-// compiler-side replay driver (fhetch_driver) recognizes this exact
-// quadruple STRUCTURALLY (def-use chained, immediates fully determined by
-// (q_i, target_p), intermediates consumed only by the chain) and
-// substitutes a single SwitchModulus pseudo-op whose immediates are
-// recomputed for the active data format — under --niobium_hw that is the
-// Montgomery variant (R^2 mod p / -R*halfQ mod p). No marker comment is
-// needed or emitted.
+// Emits, in SSA form (each op writes a fresh result and reads the previous
+// op's result, so every trace address is defined exactly once), one of:
+//   ThreeOp (default): addi / muli(imm=1) / addi  — shift / rebase / unshift.
+//   FourOp:            muli(imm=1) / addi / muli(imm=1) / addi  — the same
+//     three ops prefixed by a LEADING IDENTITY multiply so the chain forms the
+//     canonical muli/addi/muli/addi quadruple.
+// The leading identity exists ONLY for FourOp's hardware path: the hardware
+// replay driver (fhetch_driver) recognizes that exact quadruple STRUCTURALLY
+// (def-use chained, immediates fully determined by (q_i, target_p),
+// intermediates consumed only by the chain) and substitutes a single
+// SwitchModulus pseudo-op whose immediates are recomputed for the active data
+// format — under --niobium_hw the Montgomery variant (R^2 mod p / -R*halfQ mod p).
+// The in-process simulator never does that substitution, so ThreeOp drops the
+// identity (it is a no-op multiply: both shapes lower to the identical value and
+// replay bit-for-bit the same). The recorded immediates are ordinary-form either
+// way — client traces are always ordinary-form; hardware-izing happens
+// driver-side. No marker comment is needed or emitted.
 //
 // The immediates cannot be baked Montgomery-form client-side: the same
 // trace replays in BOTH modes (ordinary replay would see spurious R
@@ -1118,27 +1122,45 @@ std::vector<Polynomial> prescale_by_q_hat(const MRP& x, const std::vector<uint64
 //   unshifted = (rebased + (-halfQ_i mod p)) mod p
 // For scaled in [0, halfQ]:    unshifted = scaled mod p              (centered >= 0)
 // For scaled in (halfQ, q_i):  unshifted = (scaled - q_i) mod p      (centered < 0)
-Polynomial center_mod_q_into_p(const Polynomial& scaled_i, uint64_t q_i, uint64_t target_p) {
+Polynomial center_mod_q_into_p(const Polynomial& scaled_i, uint64_t q_i, uint64_t target_p,
+                               FbcCenterShape shape) {
     // Ordinary-form immediates, spelled inline: the client never computes
     // Montgomery constants — the replay driver owns the hardware transform
     // and recomputes these per replay mode when it substitutes the block.
     const uint64_t half_q = (q_i - 1U) / 2U;
     const uint64_t x = half_q % target_p;
     const uint64_t neg_half = (x == 0U) ? 0U : target_p - x;
-    auto t1 = sr_mulps(scaled_i, Scalar::from_int(1), q_i);
-    auto t2 = sr_addps(t1, Scalar::from_int(half_q), q_i);
-    auto t3 = sr_mulps(t2, Scalar::from_int(1), target_p);
-    return sr_addps(t3, Scalar::from_int(neg_half), target_p);
+    // Three ops: shift (mod q_i) / rebase (cross-prime, the imm=1 multiply is the
+    // SwitchModulus placeholder the sim has no opcode for) / unshift (mod p).
+    //   shifted   = (scaled_i + halfQ_i)         mod q_i
+    //   rebased   = shifted                      mod target_p
+    //   unshifted = (rebased + (-halfQ_i mod p)) mod p
+    // FourOp additionally prefixes a leading `sr_mulps imm=1` IDENTITY on scaled_i so
+    // the chain forms the muli/addi/muli/addi quadruple the hardware replay driver
+    // (fhetch_driver) recognizes (def-use chained, immediates fully determined by
+    // (q_i, target_p)) and substitutes with a single SwitchModulus — under
+    // --niobium_hw the Montgomery variant (R^2 mod p / -R*halfQ mod p). The identity
+    // is a no-op (multiply by 1), so both shapes lower to the identical value and
+    // replay bit-for-bit the same; FourOp exists ONLY to be recognizable on the
+    // hardware replay path. (The immediates cannot be baked Montgomery-form
+    // client-side: the same trace replays in both modes, and the cross-modulus rebase
+    // has no constant valid under both interpretations, so per-mode substitution at
+    // replay is required.)
+    const Polynomial shift_in =
+        (shape == FbcCenterShape::FourOp) ? sr_mulps(scaled_i, Scalar::from_int(1), q_i) : scaled_i;
+    auto shifted = sr_addps(shift_in, Scalar::from_int(half_q), q_i);
+    auto rebased = sr_mulps(shifted, Scalar::from_int(1), target_p);
+    return sr_addps(rebased, Scalar::from_int(neg_half), target_p);
 }
 
 // One term of the FBC sum at target prime p:
 //   Standard:     (scaled[i] mod p) * q_star[i] mod p
 //   ReducedNoise: (center_qi(scaled[i]) mod p) * q_star[i] mod p
 Polynomial fbc_term(const Polynomial& scaled_i, uint64_t q_i, uint64_t target_p,
-                    uint64_t q_star_i, FbcVariant variant) {
+                    uint64_t q_star_i, FbcVariant variant, FbcCenterShape shape) {
     Polynomial coeff = scaled_i;
     if (variant == FbcVariant::ReducedNoise) {
-        coeff = center_mod_q_into_p(scaled_i, q_i, target_p);
+        coeff = center_mod_q_into_p(scaled_i, q_i, target_p, shape);
     }
     return sr_mulps(coeff, Scalar::from_int(q_star_i), target_p);
 }
@@ -1147,10 +1169,10 @@ Polynomial fbc_term(const Polynomial& scaled_i, uint64_t q_i, uint64_t target_p,
 // real instruction (avoids leaving an add-against-zero seed for DCE to elide).
 Polynomial sum_fbc_terms(const std::vector<Polynomial>& scaled, const ModuliBase& source_base,
                          uint64_t target_p, const std::vector<uint64_t>& q_star,
-                         FbcVariant variant) {
-    Polynomial acc = fbc_term(scaled[0], source_base[0], target_p, q_star[0], variant);
+                         FbcVariant variant, FbcCenterShape shape) {
+    Polynomial acc = fbc_term(scaled[0], source_base[0], target_p, q_star[0], variant, shape);
     for (size_t i = 1; i < source_base.size(); ++i) {
-        Polynomial term = fbc_term(scaled[i], source_base[i], target_p, q_star[i], variant);
+        Polynomial term = fbc_term(scaled[i], source_base[i], target_p, q_star[i], variant, shape);
         acc = sr_addp(acc, term, target_p);
     }
     return acc;
@@ -1217,7 +1239,8 @@ Polynomial rescale_residue(const Polynomial& x_q, const Polynomial& y_q, uint64_
 // at the digit's own primes.
 //
 // Reference: Cheon-Han-Kim-Kim-Song SAC 2018 §4.1 (BasisExtension).
-MRP fast_base_convert(const MRP& x, const ModuliBase& target_base, FbcVariant variant) {
+MRP fast_base_convert(const MRP& x, const ModuliBase& target_base, FbcVariant variant,
+                      FbcCenterShape shape) {
     const ModuliBase& source_base = x.base();
     std::vector<std::pair<Polynomial, uint64_t>> pairs;
     pairs.reserve(target_base.size());
@@ -1239,15 +1262,21 @@ MRP fast_base_convert(const MRP& x, const ModuliBase& target_base, FbcVariant va
             continue;
         }
         const auto q_star = q_hat_mod_p(source_base, p);
-        pairs.emplace_back(sum_fbc_terms(scaled, source_base, p, q_star, variant), p);
+        pairs.emplace_back(sum_fbc_terms(scaled, source_base, p, q_star, variant, shape), p);
     }
     return MRP::from_pairs(pairs);
 }
 
+// 3-arg overload defaults the center shape to ThreeOp (the simulator-native lean
+// lowering); pass FourOp explicitly for a hardware-recognizable trace.
+MRP fast_base_convert(const MRP& x, const ModuliBase& target_base, FbcVariant variant) {
+    return fast_base_convert(x, target_base, variant, FbcCenterShape::ThreeOp);
+}
+
 // 2-arg overload defaults to ReducedNoise — the variant that matches the
-// niobium-instrumented OpenFHE built with WITH_REDUCED_NOISE=ON.
+// niobium-instrumented OpenFHE built with WITH_REDUCED_NOISE=ON — and ThreeOp.
 MRP fast_base_convert(const MRP& x, const ModuliBase& target_base) {
-    return fast_base_convert(x, target_base, FbcVariant::ReducedNoise);
+    return fast_base_convert(x, target_base, FbcVariant::ReducedNoise, FbcCenterShape::ThreeOp);
 }
 
 // Approximate mod-down (CKKS rescale). Math:
@@ -1258,14 +1287,15 @@ MRP fast_base_convert(const MRP& x, const ModuliBase& target_base) {
 //
 // Reference: Cheon-Han-Kim-Kim-Song SAC 2018 §4.2 (ModulusReduction). Same
 // algorithm as lbcrypto::DCRTPolyImpl::ApproxModDown.
-MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base, FbcVariant variant) {
+MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base, FbcVariant variant,
+                FbcCenterShape shape) {
     assert(!rescale_base.empty() && "rescale_base must be non-empty");
     const ModuliBase target_base = target_after_rescale(x.base(), rescale_base);
     assert(target_base.size() < x.base().size() &&
            "rescale_base must be a proper subset of x.base()");
 
     const MRP x_rescale = mr_subset(x, rescale_base);
-    const MRP y = fast_base_convert(x_rescale, target_base, variant);
+    const MRP y = fast_base_convert(x_rescale, target_base, variant, shape);
     const auto P_inv = P_inv_mod_q(rescale_base, target_base);
 
     std::vector<std::pair<Polynomial, uint64_t>> pairs;
@@ -1277,9 +1307,15 @@ MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base, FbcVariant variant
     return MRP::from_pairs(pairs);
 }
 
-// 2-arg overload — same ReducedNoise default rationale as fast_base_convert.
+// 3-arg overload defaults the center shape to ThreeOp (lean); pass FourOp for a
+// hardware-recognizable trace.
+MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base, FbcVariant variant) {
+    return rescale_fbc(x, rescale_base, variant, FbcCenterShape::ThreeOp);
+}
+
+// 2-arg overload — same ReducedNoise default rationale as fast_base_convert, ThreeOp.
 MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base) {
-    return rescale_fbc(x, rescale_base, FbcVariant::ReducedNoise);
+    return rescale_fbc(x, rescale_base, FbcVariant::ReducedNoise, FbcCenterShape::ThreeOp);
 }
 
 // ============================================================================
@@ -1302,16 +1338,23 @@ MRP mrpa_dotproduct(const MRPArray& x, const MRPArray& y) {
 
 MRPArray dig_decomp(const MRP& x,
                      const std::vector<ModuliBase>& digit_bases,
-                     const ModuliBase& p_base) {
+                     const ModuliBase& p_base, FbcCenterShape shape) {
     ModuliBase target_base = x.base();
     for (auto p : p_base) target_base.push_back(p);
     size_t d = digit_bases.size();
     MRPArray z(d);
     for (size_t i = 0; i < d; ++i) {
         MRP temp = mr_subset(x, digit_bases[i]);
-        z[i] = fast_base_convert(temp, target_base);
+        z[i] = fast_base_convert(temp, target_base, FbcVariant::ReducedNoise, shape);
     }
     return z;
+}
+
+// Default center shape = ThreeOp (lean).
+MRPArray dig_decomp(const MRP& x,
+                     const std::vector<ModuliBase>& digit_bases,
+                     const ModuliBase& p_base) {
+    return dig_decomp(x, digit_bases, p_base, FbcCenterShape::ThreeOp);
 }
 
 SRPArray gadget_decomp(const Polynomial& x, uint64_t /*base*/, uint64_t n_levels) {
