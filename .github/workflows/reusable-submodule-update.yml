@@ -19,6 +19,24 @@ on:
         description: 'Branch to track in the submodule repo (e.g. nb_main)'
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      submodule-path:
+        description: 'Path to the submodule (e.g. vendor/openfhe)'
+        required: true
+        type: string
+      submodule-name:
+        description: 'Short name of the submodule (e.g. openfhe)'
+        required: true
+        type: string
+      submodule-org-repo:
+        description: 'GitHub org/repo slug (e.g. NiobiumInc/openfhe-development)'
+        required: true
+        type: string
+      target-branch:
+        description: 'Branch to track in the submodule repo (e.g. nb_main)'
+        required: true
+        type: string
 
 permissions:
   contents: write

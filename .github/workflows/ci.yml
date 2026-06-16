@@ -31,12 +31,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # GH_COMPANY_TOKEN is used because vendor/openfhe points at
-          # NiobiumInc/openfhe-development which may be private until the
-          # full FHETCH toolchain goes public. If the secret is unset, the
-          # expression falls back to the auto-generated GITHUB_TOKEN — which
-          # works fine once every submodule is public.
-          token: ${{ secrets.GH_COMPANY_TOKEN || github.token }}
           submodules: recursive
           fetch-depth: 1
 
