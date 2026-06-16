@@ -730,12 +730,36 @@ enum class FbcVariant {
     ReducedNoise,
 };
 
+/// Lowering shape for the FBC `center_mod_q_into_p` (signed-center + cross-prime
+/// rebase) gadget, selectable at the call site like FbcVariant.
+///   ThreeOp  — the simulator-native `shift / rebase / unshift` lowering
+///              (sr_addps, sr_mulps imm=1, sr_addps): three instructions.
+///   FourOp   — the same, prefixed by a leading `sr_mulps imm=1` IDENTITY so the
+///              op chain forms the muli/addi/muli/addi quadruple the hardware
+///              replay driver (fhetch_driver) recognizes and substitutes with a
+///              single SwitchModulus (Montgomery under --niobium_hw): four ops.
+/// Both lower to the identical value (the leading multiply is by 1), so a trace
+/// replays bit-for-bit the same either way; FourOp only exists to be recognized
+/// on the hardware replay path. ThreeOp is the default — local-sim/ordinary
+/// replay never does the substitution, so the identity is dead weight there (it
+/// is ~half of all sr_mulps in a deep CKKS trace).
+enum class FbcCenterShape {
+    ThreeOp,
+    FourOp,
+};
+
 /// Fast base conversion.
 /// Converts a coefficient-mode MRP from its current base to target_base
 /// using the CRT-based approximate conversion algorithm.
 /// @param x            Coefficient-mode MRP in source base.
 /// @param target_base  Target moduli base.
 /// @param variant      FBC algorithm variant (see FbcVariant).
+/// @param shape        FBC center lowering shape (see FbcCenterShape).
+MRP fast_base_convert(const MRP& x, const ModuliBase& target_base,
+                      FbcVariant variant, FbcCenterShape shape);
+
+/// Fast base conversion (default center shape = ThreeOp). Equivalent to
+/// `fast_base_convert(x, target_base, variant, FbcCenterShape::ThreeOp)`.
 MRP fast_base_convert(const MRP& x, const ModuliBase& target_base,
                       FbcVariant variant);
 
@@ -752,13 +776,19 @@ MRP fast_base_convert(const MRP& x, const ModuliBase& target_base);
 /// @param rescale_base   Moduli to remove (subset of x.base()).
 /// @param variant        FBC algorithm variant used by the internal lift
 ///                       (see FbcVariant).
+/// @param shape          FBC center lowering shape (see FbcCenterShape).
 /// @return MRP in base = x.base() \ rescale_base.
+MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base,
+                FbcVariant variant, FbcCenterShape shape);
+
+/// CKKS rescale (default center shape = ThreeOp). Equivalent to
+/// `rescale_fbc(x, rescale_base, variant, FbcCenterShape::ThreeOp)`.
 MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base,
                 FbcVariant variant);
 
-/// CKKS rescale (default variant). Equivalent to
-/// `rescale_fbc(x, rescale_base, FbcVariant::ReducedNoise)`. Retained as a
-/// distinct symbol for ABI compatibility (see fast_base_convert overload).
+/// CKKS rescale (default variant + center shape). Equivalent to
+/// `rescale_fbc(x, rescale_base, FbcVariant::ReducedNoise, FbcCenterShape::ThreeOp)`.
+/// Retained as a distinct symbol for ABI compatibility (see fast_base_convert overload).
 MRP rescale_fbc(const MRP& x, const ModuliBase& rescale_base);
 
 // ============================================================================
@@ -779,8 +809,15 @@ MRP mrpa_dotproduct(const MRPArray& x, const MRPArray& y);
 /// @param x            Coefficient-mode MRP in RNS base representing Q.
 /// @param digit_bases  List of d mutually exclusive moduli sub-bases.
 /// @param p_base       RNS base for the temporary modulus P.
+/// @param shape        FBC center lowering shape for the internal lift
+///                     (see FbcCenterShape); defaults to ThreeOp.
 /// @return MRPA of length d; element i is base-extended from digit_bases[i]
 ///         to (x.base() ∪ p_base).
+MRPArray dig_decomp(const MRP& x,
+                     const std::vector<ModuliBase>& digit_bases,
+                     const ModuliBase& p_base, FbcCenterShape shape);
+
+/// dig_decomp with default center shape = ThreeOp.
 MRPArray dig_decomp(const MRP& x,
                      const std::vector<ModuliBase>& digit_bases,
                      const ModuliBase& p_base);
