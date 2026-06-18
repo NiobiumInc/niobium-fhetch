@@ -1233,8 +1233,13 @@ void Compiler::write_replay_json() {
             // here so the compiler reads them through its evalmult_keys /
             // evalautomorphism_keys paths instead of treating them as user
             // inputs.
+            // Bootstrap precompute is similarly serialized separately to
+            // .bp.bin / .bp.ids by tag_bootstrap_precompute and loaded by
+            // load_source_keys — skip it here so inputs.json doesn't reference
+            // a non-existent .input_bootstrap_precompute.bin file.
             if (input.name == "evalmult_key" ||
-                input.name == "automorphism_key") {
+                input.name == "automorphism_key" ||
+                input.name == "bootstrap_precompute") {
                 continue;
             }
             json idx;
