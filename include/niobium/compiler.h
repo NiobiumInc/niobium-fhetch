@@ -223,6 +223,21 @@ class Compiler {
     /// Check if multi-threaded recording is enabled.
     bool is_multithreaded() const;
 
+    /// Stream tagged input/key polynomial data straight to the on-disk .bin
+    /// files at tag time and drop the in-RAM copy, instead of buffering every
+    /// captured input's coefficient values until stop(). Recording memory
+    /// otherwise scales with the number of tagged inputs (each ~one ciphertext
+    /// worth of polynomials), which dominates input-heavy workloads.
+    ///
+    /// Trade-off: the in-process replay() simulator-load path consumes the
+    /// buffered values, so enable this only for cooperative / transport replay
+    /// flows where the trace is replayed in a separate process that reads the
+    /// .bin files back from disk. Call before start().
+    void enable_input_streaming(bool enabled = true);
+
+    /// Check if input streaming (drop buffered input values) is active.
+    bool is_input_streaming() const;
+
     // ====================================================================
     // FHETCH MODE
     // ====================================================================
