@@ -419,8 +419,12 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
     if (file)
         set_input_source(input_name, file->string());
 
-    // Store reference for re-extraction at replay() time
-    g_stored_ciphertexts.push_back(ct);
+    // Store reference for re-extraction at replay() time. Skipped under input
+    // streaming: g_stored_ciphertexts is only consumed by refresh_all_inputs()
+    // (in-process re-extraction); retaining every tagged ciphertext otherwise
+    // keeps a second full copy of the input data resident until the run ends.
+    if (!is_input_streaming())
+        g_stored_ciphertexts.push_back(ct);
 }
 
 template<>

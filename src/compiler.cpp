@@ -72,6 +72,9 @@ struct Compiler::Impl {
     bool hollow_mode = false;
     bool multithreaded = false;
     bool fhetch_mode = false;
+    // When true, drop the in-RAM copy of tagged input/key coefficient values
+    // (the .bin is written to disk at tag time). See enable_input_streaming().
+    bool input_streaming = false;
 
     // Epochs
     uint32_t epoch_id = 0;
@@ -571,7 +574,15 @@ void Compiler::store_input_element(const std::string& input_name,
     }
     if (starts_new_element)
         rec.element_starts.push_back(rec.elements.size());
-    rec.elements.push_back({addr_id, modulus, values});
+    // With input streaming enabled the input/key .bin files are written to disk
+    // at tag time (write_ciphertext_input_files / serialize_eval_keys, from the
+    // live OpenFHE objects), so the only consumer of this in-RAM copy is the
+    // in-process replay() simulator load. Drop the heavy coefficient data and
+    // keep just the addr_id+modulus metadata (element structure stays intact).
+    if (impl_->input_streaming)
+        rec.elements.push_back({addr_id, modulus, {}});
+    else
+        rec.elements.push_back({addr_id, modulus, values});
 }
 
 void Compiler::set_input_source(const std::string& input_name,
@@ -634,6 +645,14 @@ void Compiler::enable_multithreaded_recording() {
 
 bool Compiler::is_multithreaded() const {
     return impl_->multithreaded;
+}
+
+void Compiler::enable_input_streaming(bool enabled) {
+    impl_->input_streaming = enabled;
+}
+
+bool Compiler::is_input_streaming() const {
+    return impl_->input_streaming;
 }
 
 // ============================================================================
