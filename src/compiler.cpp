@@ -1318,16 +1318,19 @@ void Compiler::write_replay_json() {
         }
     }
 
-    // Key file references
+    // Key file references. Relative to the project directory (like every
+    // other entry) so the project stays relocatable: replay hosts resolve
+    // them against the shipped project dir, where absolute recorder paths
+    // would dangle and the replay would silently load zero keys.
     auto mk_bin = dir / (prog + ".mk.bin");
     if (std::filesystem::exists(mk_bin)) {
-        files["evalmult_keys"] = (dir / (prog + ".mk.bin")).string();
-        files["evalmult_ids"] = (dir / (prog + ".mk.ids")).string();
+        files["evalmult_keys"] = prog + ".mk.bin";
+        files["evalmult_ids"] = prog + ".mk.ids";
     }
     auto rk_bin = dir / (prog + ".rk.bin");
     if (std::filesystem::exists(rk_bin)) {
-        files["evalautomorphism_keys"] = (dir / (prog + ".rk.bin")).string();
-        files["evalautomorphism_ids"] = (dir / (prog + ".rk.ids")).string();
+        files["evalautomorphism_keys"] = prog + ".rk.bin";
+        files["evalautomorphism_ids"] = prog + ".rk.ids";
     }
     auto bp_bin = dir / (prog + ".bp.bin");
     if (std::filesystem::exists(bp_bin)) {
