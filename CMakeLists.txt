@@ -31,6 +31,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -Wextra -Wunused-but-set-variable -Wno-un
 
 option(BUILD_SHARED_LIBS   "Build shared libraries instead of static ones" ON)
 option(WITH_FHETCH_SIM     "Build the standalone FHETCH simulator CLI (fhetch_sim). The simulator is always linked into the library because Compiler::replay() uses it." ON)
+option(WITH_PYTHON         "Build the Python bindings: the vendored openfhe-python crypto module + the niobium::compiler() session module. Requires pybind11 + Python dev headers (pass -Dpybind11_DIR and -DPython_EXECUTABLE)." OFF)
 
 # Link OpenFHE's *_static.a archives instead of the shared OPENFHE* libraries.
 # Default OFF preserves the historical shared link exactly. Turned ON by parents
@@ -164,6 +165,65 @@ if(WITH_FHETCH_SIM)
     else()
       set_target_properties(fhetch_sim PROPERTIES
           BUILD_RPATH "${OPENFHE_LIBRARY_PATH}")
+    endif()
+endif()
+
+# ==============================================================================
+# Python bindings (optional)
+# ==============================================================================
+# Two extension modules that share the single loaded instrumented OpenFHE +
+# libnbfhetch (so probes fire into the active recording session):
+#   * openfhe        — vendored openfhe-python, built UNMODIFIED via its own CMake
+#                      (ExternalProject; its CMakeLists uses CMAKE_SOURCE_DIR and a
+#                      site-packages install that don't compose under add_subdirectory)
+#   * niobium_session — the niobium::compiler() session bindings (our source)
+# Both land in ${CMAKE_BINARY_DIR}/python. The niobium-client wheel build flips
+# this same option; here it backs the `*-python-release` dev/smoke make targets.
+
+if(WITH_PYTHON)
+    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+    find_package(pybind11 CONFIG REQUIRED)
+
+    set(NB_PY_OUTDIR "${CMAKE_BINARY_DIR}/python")
+    file(MAKE_DIRECTORY "${NB_PY_OUTDIR}")
+
+    # --- Crypto module: vendored openfhe-python, built via its own CMake ---
+    include(ExternalProject)
+    ExternalProject_Add(openfhe_python
+        SOURCE_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/openfhe-python"
+        CMAKE_ARGS
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            # Match libnbfhetch: the OpenFHE probe hooks are header-inlined and
+            # guarded by OPENFHE_CPROBES, and the OpenFHE config does NOT
+            # propagate the define. Without it, openfhe.so's inlined clone/copy
+            # and Cereal-deserialize id-assignment probes compile out, so
+            # recording on *deserialized* ciphertexts drops the input copy-in
+            # ops (inputs replay as zero). WITH_CPROBES in the OpenFHE build is
+            # exactly `add_definitions(-DOPENFHE_CPROBES)`.
+            -DCMAKE_CXX_FLAGS=-DOPENFHE_CPROBES
+            -DOpenFHE_DIR=${OPENFHE_INSTALL_DIR}/lib/OpenFHE
+            -DOPENFHE_REQUIRED_VERSION=1.4.2
+            -Dpybind11_DIR=${pybind11_DIR}
+            -DPython_EXECUTABLE=${Python_EXECUTABLE}
+            -DPYTHON_EXECUTABLE_PATH=${Python_EXECUTABLE}
+            -DCMAKE_INSTALL_PREFIX=${NB_PY_OUTDIR}
+        BUILD_ALWAYS ON
+        INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${CMAKE_BUILD_TYPE}
+    )
+
+    # --- Session module: niobium::compiler() bindings (our source) ---
+    # Links niobium_fhetch, which PUBLIC-propagates the OpenFHE includes/libs and
+    # the OPENFHE_CPROBES define, so the headers compile identically to the library.
+    pybind11_add_module(niobium_session python/niobium_session.cpp)
+    target_link_libraries(niobium_session PRIVATE niobium_fhetch)
+    set_target_properties(niobium_session PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${NB_PY_OUTDIR}")
+    if(APPLE)
+        set_target_properties(niobium_session PROPERTIES
+            BUILD_RPATH "@loader_path;${OPENFHE_LIBRARY_PATH}")
+    else()
+        set_target_properties(niobium_session PROPERTIES
+            BUILD_RPATH "$ORIGIN;${OPENFHE_LIBRARY_PATH}")
     endif()
 endif()
 
