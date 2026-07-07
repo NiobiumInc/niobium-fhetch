@@ -12,7 +12,7 @@ namespace py = pybind11;
 using namespace lbcrypto;
 
 PYBIND11_MODULE(niobium_session, m) {
-    m.doc() = "niobium::compiler() session bindings (experimental)";
+    m.doc() = "niobium::compiler() session bindings";
 
     m.def("init", [](std::vector<std::string> args) {
         static char prog[] = "niobium_session";
@@ -39,7 +39,15 @@ PYBIND11_MODULE(niobium_session, m) {
     m.def("is_cache_valid", []() { return niobium::compiler().is_cache_valid(); });
     m.def("start", []() { return niobium::compiler().start(); });
     m.def("stop", []() { return niobium::compiler().stop(); });
+    m.def("pause", []() { return niobium::compiler().pause(); });
+    m.def("resume", []() { return niobium::compiler().resume(); });
+    m.def("running_p", []() { return niobium::compiler().running_p(); });
+    m.def("stopped_p", []() { return niobium::compiler().stopped_p(); });
     m.def("replay", []() { return niobium::compiler().replay(); });
+    m.def("set_ring_dimension", [](uint64_t n) { niobium::compiler().set_ring_dimension(n); });
+    m.def("get_program_directory", []() {
+        return niobium::compiler().get_program_directory().string();
+    });
 
     // Templated on OpenFHE types — instantiated for DCRTPoly here.
     m.def("capture_crypto_context", [](CryptoContext<DCRTPoly> cc) {
