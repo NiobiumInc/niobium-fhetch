@@ -188,9 +188,34 @@ if(WITH_PYTHON)
     file(MAKE_DIRECTORY "${NB_PY_OUTDIR}")
 
     # --- Crypto module: vendored openfhe-python, built via its own CMake ---
+    # Build from a PATCHED COPY, not the submodule in place. openfhe-python's
+    # CMakeLists requests full Python "Development" (which needs Development.Embed =
+    # libpython). manylinux Pythons are module-only (no libpython), so that find
+    # fails there — yet openfhe-python never links libpython: pybind11_add_module
+    # builds the extension, and the find_package(Python) result is used only for the
+    # interpreter version + exec_prefix. Rewrite it to Development.Module (the correct
+    # component for an extension module) in a build-tree copy, leaving the vendored
+    # submodule pristine (no dirty working tree, no committed delta). Upstream ships
+    # Ubuntu-specific wheels (system libpython present), so this path was never hit
+    # there; see STATE / PYTHON_WHEEL_PLAN.
+    set(NB_OFHE_PY_COPY "${CMAKE_BINARY_DIR}/openfhe-python-src")
+    file(REMOVE_RECURSE "${NB_OFHE_PY_COPY}")
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/vendor/openfhe-python/"
+         DESTINATION "${NB_OFHE_PY_COPY}")
+    file(READ "${NB_OFHE_PY_COPY}/CMakeLists.txt" _nb_ofhe_cml)
+    string(REPLACE "COMPONENTS Interpreter Development)"
+                   "COMPONENTS Interpreter Development.Module)"
+                   _nb_ofhe_patched "${_nb_ofhe_cml}")
+    if(_nb_ofhe_cml STREQUAL _nb_ofhe_patched)
+        message(WARNING "openfhe-python Development->Development.Module patch did not "
+                        "apply (upstream CMakeLists changed?); manylinux builds may fail.")
+    endif()
+    file(WRITE "${NB_OFHE_PY_COPY}/CMakeLists.txt" "${_nb_ofhe_patched}")
+
     include(ExternalProject)
     ExternalProject_Add(openfhe_python
-        SOURCE_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/openfhe-python"
+        SOURCE_DIR       "${NB_OFHE_PY_COPY}"
+        DOWNLOAD_COMMAND ""
         CMAKE_ARGS
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             # Match libnbfhetch: the OpenFHE probe hooks are header-inlined and
