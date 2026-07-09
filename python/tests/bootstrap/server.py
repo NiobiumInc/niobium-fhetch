@@ -35,7 +35,7 @@ def main(argv):
 
     nb.init(flags)
     nb.set_program_info("bootstrap_server", "1.0", "CKKS bootstrapping")
-    nb.set_build_info(__file__, 1, "n/a")
+    nb.set_build_info(__file__)
     nb.cache_parameters([("workload", "ckks_bootstrap")])
     nb.capture_crypto_context(cc)
     nb.tag_input("input_cipher", ciph)

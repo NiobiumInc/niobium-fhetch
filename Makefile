@@ -481,9 +481,9 @@ test-roundtrip-bootstrap-python-release: build-python-release ## Full python rou
 test-roundtrip-python-release: test-roundtrip-simple-ops-python-release test-roundtrip-plaintext-add-python-release test-roundtrip-bootstrap-python-release ## Full python roundtrip sweep: simple_ops + plaintext-add + bootstrap
 
 # TEMPORARY (remove when the IR channel covers these): smoke for session endpoints
-# not exercised by the recorder scenarios — pause/resume, running_p/stopped_p,
-# get_program_directory, set_ring_dimension.
-test-session-api-python-release: build-python-release ## TEMP: session-endpoint smoke (pause/resume, running_p, get_program_directory, set_ring_dimension)
+# not exercised by the recorder scenarios — pause/resume, is_running/is_stopped,
+# get_program_directory.
+test-session-api-python-release: build-python-release ## TEMP: session-endpoint smoke (pause/resume, is_running, get_program_directory)
 	$(call set-build-config,Release,build)
 	@rm -rf session_api_smoke_workload_*
 	$(PY_EXE) python/tests/session_api_smoke.py

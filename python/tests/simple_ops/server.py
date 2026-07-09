@@ -68,7 +68,7 @@ def main(argv):
 
     nb.init(flags)
     nb.set_program_info("simple_ops_server", "1.0", "CKKS simple ops — FHETCH trace")
-    nb.set_build_info(__file__, 1, "n/a")
+    nb.set_build_info(__file__)
     nb.cache_parameters([("workload", "simple_ops"), ("op", op)])
     nb.capture_crypto_context(cc)
     nb.tag_input("ct_a", ct_a)

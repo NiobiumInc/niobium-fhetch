@@ -28,7 +28,7 @@ def main(argv):
 
     nb.init(flags)
     nb.set_program_info("plaintext_add_server", "1.0", "CKKS plaintext+ciphertext add")
-    nb.set_build_info(__file__, 1, "n/a")
+    nb.set_build_info(__file__)
     nb.cache_parameters([("workload", "ckks_plaintext_add")])
     nb.capture_crypto_context(cc)
     nb.tag_input("input_cipher", ciph)

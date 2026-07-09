@@ -28,10 +28,10 @@ PYBIND11_MODULE(niobium_session, m) {
 
     m.def("set_program_info", [](const std::string &n, const std::string &v, const std::string &d) {
         niobium::compiler().set_program_info(n, v, d);
-    });
+    }, py::arg("name") = "", py::arg("version") = "", py::arg("description") = "");
     m.def("set_build_info", [](const std::string &f, int l, const std::string &t) {
         niobium::compiler().set_build_info(f, l, t);
-    });
+    }, py::arg("file") = "", py::arg("line") = 0, py::arg("timestamp") = "");
     m.def("cache_parameters", [](std::vector<std::pair<std::string, std::string>> p) {
         niobium::Compiler::CacheParameters cp(p.begin(), p.end());
         niobium::compiler().cache_parameters(cp);
@@ -41,10 +41,13 @@ PYBIND11_MODULE(niobium_session, m) {
     m.def("stop", []() { return niobium::compiler().stop(); });
     m.def("pause", []() { return niobium::compiler().pause(); });
     m.def("resume", []() { return niobium::compiler().resume(); });
-    m.def("running_p", []() { return niobium::compiler().running_p(); });
-    m.def("stopped_p", []() { return niobium::compiler().stopped_p(); });
+    m.def("is_running", []() { return niobium::compiler().running_p(); });
+    m.def("is_stopped", []() { return niobium::compiler().stopped_p(); });
     m.def("replay", []() { return niobium::compiler().replay(); });
-    m.def("set_ring_dimension", [](uint64_t n) { niobium::compiler().set_ring_dimension(n); });
+    // set_ring_dimension is intentionally NOT bound here: in the recorder path
+    // capture_crypto_context() sets it from the CryptoContext's own ring dim
+    // (OpenFHE's GetRingDimension()), so a manual setter is redundant. It belongs
+    // to the direct-FHETCH-IR binding (niobium_ir), where there is no CryptoContext.
     m.def("get_program_directory", []() {
         return niobium::compiler().get_program_directory().string();
     });

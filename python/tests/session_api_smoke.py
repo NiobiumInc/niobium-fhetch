@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """TEMPORARY bespoke smoke for session endpoints the recorder scenarios don't reach:
-pause/resume, running_p/stopped_p, get_program_directory, set_ring_dimension.
+pause/resume, is_running/is_stopped, get_program_directory.
 
 These have no recorder-channel (ep-2) C++ scenario to mirror — their faithful tests
-belong elsewhere: get_program_directory + set_ring_dimension to the IR-emission
-channel's simple_fhetch port, and pause/resume to a ScopedPause utility test. This
-file intentionally diverges from the replicate-only convention; REMOVE it once the
-IR channel provides that coverage.
+belong elsewhere: get_program_directory to the IR-emission channel's simple_fhetch
+port, and pause/resume to a ScopedPause utility test. This file intentionally
+diverges from the replicate-only convention; REMOVE it once the IR channel provides
+that coverage.
 
 Run: session_api_smoke.py     Env: NB_FHETCH_LIB, PYTHONPATH (build/python).
 """
@@ -37,18 +37,17 @@ def main():
 
     nb.init(["--no-ring-dim-check"])
     nb.set_program_info("session_api_smoke", "1.0", "session endpoint smoke")
-    nb.set_build_info(__file__, 1, "n/a")
+    nb.set_build_info(__file__)  # line/timestamp default; see wheel facade for auto-capture
     nb.cache_parameters([("workload", "session_api")])
-    nb.set_ring_dimension(65536)  # accepted; redundant here (capture overrides it)
     nb.capture_crypto_context(cc)
     nb.tag_input("a", a)
     nb.tag_input("b", b)
     nb.tag_keys(cc)
 
     checks = []
-    checks.append(("running_p() == False before start", nb.running_p() is False))
+    checks.append(("is_running() == False before start", nb.is_running() is False))
     nb.start()
-    checks.append(("running_p() == True after start", nb.running_p() is True))
+    checks.append(("is_running() == True after start", nb.is_running() is True))
 
     r = cc.EvalAdd(a, b)      # recorded
     nb.pause()
@@ -57,8 +56,8 @@ def main():
     nb.probe("result", r)
     nb.stop()
 
-    checks.append(("running_p() == False after stop", nb.running_p() is False))
-    checks.append(("stopped_p() == True after stop", nb.stopped_p() is True))
+    checks.append(("is_running() == False after stop", nb.is_running() is False))
+    checks.append(("is_stopped() == True after stop", nb.is_stopped() is True))
 
     # get_program_directory() points at where the trace was written.
     pdir = nb.get_program_directory()
