@@ -171,85 +171,13 @@ endif()
 # ==============================================================================
 # Python bindings (optional)
 # ==============================================================================
-# Two extension modules that share the single loaded instrumented OpenFHE +
-# libnbfhetch (so probes fire into the active recording session):
-#   * openfhe        — vendored openfhe-python, built UNMODIFIED via its own CMake
-#                      (ExternalProject; its CMakeLists uses CMAKE_SOURCE_DIR and a
-#                      site-packages install that don't compose under add_subdirectory)
-#   * niobium_session — the niobium::compiler() session bindings (our source)
-# Both land in ${CMAKE_BINARY_DIR}/python. The niobium-client wheel build flips
-# this same option; here it backs the `*-python-release` dev/smoke make targets.
+# The vendored openfhe-python crypto module + the niobium::compiler() session
+# module. Self-contained under python/ (both land in ${CMAKE_BINARY_DIR}/python).
+# The niobium-client wheel build flips WITH_PYTHON the same way; here it backs the
+# `*-python-release` dev/smoke make targets. See python/CMakeLists.txt.
 
 if(WITH_PYTHON)
-    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-    find_package(pybind11 CONFIG REQUIRED)
-
-    set(NB_PY_OUTDIR "${CMAKE_BINARY_DIR}/python")
-    file(MAKE_DIRECTORY "${NB_PY_OUTDIR}")
-
-    # --- Crypto module: vendored openfhe-python, built via its own CMake ---
-    # Build from a PATCHED COPY, not the submodule in place. openfhe-python's
-    # CMakeLists requests full Python "Development" (which needs Development.Embed =
-    # libpython). manylinux Pythons are module-only (no libpython), so that find
-    # fails there — yet openfhe-python never links libpython: pybind11_add_module
-    # builds the extension, and the find_package(Python) result is used only for the
-    # interpreter version + exec_prefix. Rewrite it to Development.Module (the correct
-    # component for an extension module) in a build-tree copy, leaving the vendored
-    # submodule pristine (no dirty working tree, no committed delta). Upstream ships
-    # Ubuntu-specific wheels (system libpython present), so this path was never hit
-    # there; see STATE / PYTHON_WHEEL_PLAN.
-    set(NB_OFHE_PY_COPY "${CMAKE_BINARY_DIR}/openfhe-python-src")
-    file(REMOVE_RECURSE "${NB_OFHE_PY_COPY}")
-    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/vendor/openfhe-python/"
-         DESTINATION "${NB_OFHE_PY_COPY}")
-    file(READ "${NB_OFHE_PY_COPY}/CMakeLists.txt" _nb_ofhe_cml)
-    string(REPLACE "COMPONENTS Interpreter Development)"
-                   "COMPONENTS Interpreter Development.Module)"
-                   _nb_ofhe_patched "${_nb_ofhe_cml}")
-    if(_nb_ofhe_cml STREQUAL _nb_ofhe_patched)
-        message(WARNING "openfhe-python Development->Development.Module patch did not "
-                        "apply (upstream CMakeLists changed?); manylinux builds may fail.")
-    endif()
-    file(WRITE "${NB_OFHE_PY_COPY}/CMakeLists.txt" "${_nb_ofhe_patched}")
-
-    include(ExternalProject)
-    ExternalProject_Add(openfhe_python
-        SOURCE_DIR       "${NB_OFHE_PY_COPY}"
-        DOWNLOAD_COMMAND ""
-        CMAKE_ARGS
-            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            # Match libnbfhetch: the OpenFHE probe hooks are header-inlined and
-            # guarded by OPENFHE_CPROBES, and the OpenFHE config does NOT
-            # propagate the define. Without it, openfhe.so's inlined clone/copy
-            # and Cereal-deserialize id-assignment probes compile out, so
-            # recording on *deserialized* ciphertexts drops the input copy-in
-            # ops (inputs replay as zero). WITH_CPROBES in the OpenFHE build is
-            # exactly `add_definitions(-DOPENFHE_CPROBES)`.
-            -DCMAKE_CXX_FLAGS=-DOPENFHE_CPROBES
-            -DOpenFHE_DIR=${OPENFHE_INSTALL_DIR}/lib/OpenFHE
-            -DOPENFHE_REQUIRED_VERSION=1.4.2
-            -Dpybind11_DIR=${pybind11_DIR}
-            -DPython_EXECUTABLE=${Python_EXECUTABLE}
-            -DPYTHON_EXECUTABLE_PATH=${Python_EXECUTABLE}
-            -DCMAKE_INSTALL_PREFIX=${NB_PY_OUTDIR}
-        BUILD_ALWAYS ON
-        INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${CMAKE_BUILD_TYPE}
-    )
-
-    # --- Session module: niobium::compiler() bindings (our source) ---
-    # Links niobium_fhetch, which PUBLIC-propagates the OpenFHE includes/libs and
-    # the OPENFHE_CPROBES define, so the headers compile identically to the library.
-    pybind11_add_module(niobium_session python/niobium_session.cpp)
-    target_link_libraries(niobium_session PRIVATE niobium_fhetch)
-    set_target_properties(niobium_session PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY "${NB_PY_OUTDIR}")
-    if(APPLE)
-        set_target_properties(niobium_session PROPERTIES
-            BUILD_RPATH "@loader_path;${OPENFHE_LIBRARY_PATH}")
-    else()
-        set_target_properties(niobium_session PROPERTIES
-            BUILD_RPATH "$ORIGIN;${OPENFHE_LIBRARY_PATH}")
-    endif()
+    add_subdirectory(python)
 endif()
 
 # ==============================================================================
