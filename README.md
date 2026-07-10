@@ -2,6 +2,8 @@
 
 Open-source FHETCH Polynomial IR library and local simulator for the **Niobium Mistic** FHE accelerator.
 
+The IR interface implemented here follows the FHETCH Polynomial IR specification published at [fhetch.org](https://fhetch.org), extended with Niobium-specific additions (multi-residue gadgets, decomposition gadgets, CKKS bootstrap, and the session/replay tooling described below).
+
 This repository provides:
 
 1. **`fhetch_api.h`** — the complete FHETCH Polynomial IR instruction set as a C++ API (baseline ops, multi-residue gadgets, decomposition gadgets, CKKS bootstrap, file I/O).
@@ -59,6 +61,8 @@ In short: the `.fhetch` trace and the `niobium::fhetch::` API surface are the in
 ### `fhetch_api.h` — FHETCH Polynomial IR
 
 Defines every FHETCH Polynomial IR instruction as a C++ function. These are **not called directly by end-user application code** — they are called by the host integration (e.g. OpenFHE probes in `niobium-client`). Each call records one hardware instruction in the trace.
+
+The baseline instruction set implements the FHETCH Polynomial IR specification at [fhetch.org](https://fhetch.org); the multi-residue and decomposition gadgets, CKKS bootstrap, and optional operations below are Niobium extensions on top of that spec.
 
 Baseline instructions (map 1:1 to hardware ISA):
 
