@@ -11,6 +11,11 @@ This repo builds the two native Python extensions behind the `niobium_client` wh
 Both are gated behind the CMake `WITH_PYTHON` option and land in
 `build/python/{openfhe,niobium_session}.*.so`.
 
+The Python build is kept out of the C++-focused root files: the CMake lives in
+[`python/CMakeLists.txt`](python/CMakeLists.txt) (`if(WITH_PYTHON) add_subdirectory(python)`
+from the root), and the dev/smoke make targets in [`make/python.mk`](make/python.mk)
+(`include`d by the root Makefile, sharing its variable namespace).
+
 ## openfhe-python: vendoring, pinning, patching
 
 openfhe-python is a **nested submodule** at `vendor/openfhe-python`, built
