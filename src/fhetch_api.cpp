@@ -28,6 +28,11 @@
 #include <vector>
 #include <utility>
 
+namespace niobium::detail {
+// Defined at the bottom of this file with the sync latch it re-arms.
+void rearm_fhetch_sync() noexcept;
+}  // namespace niobium::detail
+
 namespace niobium::fhetch {
 
 // ============================================================================
@@ -470,6 +475,8 @@ void reset_for_epoch() {
     // next_address_ rolls back to 0, so the prior epoch's entries would
     // shadow this epoch's first-write-wins inserts.
     address_modulus_map().clear();
+    // Fresh registries need a fresh sync (see g_synced_since_reset below).
+    niobium::detail::rearm_fhetch_sync();
 }
 
 // ============================================================================
@@ -1473,13 +1480,28 @@ uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p) {
     return p.impl() ? p.impl()->address : static_cast<uintptr_t>(-1);
 }
 
+// One-shot latch for sync_fhetch_state_to_compiler(): both stop() and
+// replay() call it, and a second pass would append duplicate elements to
+// the same captured records (find_or_create_record dedupes records by
+// name, not elements) — doubling every registry-tagged input in memory.
+// Re-armed whenever the registries are reset for a new recording cycle.
+static bool g_synced_since_reset = false;
+
+void rearm_fhetch_sync() noexcept {
+    g_synced_since_reset = false;
+}
+
 // Drops TU-static recording state Compiler::reset can't reach; first-write-wins
 // on address_modulus_map otherwise leaks moduli across resets.
 void clear_recording_registries() noexcept {
     niobium::fhetch::address_modulus_map().clear();
+    g_synced_since_reset = false;
 }
 
 void sync_fhetch_state_to_compiler() {
+    if (g_synced_since_reset) return;
+    g_synced_since_reset = true;
+
     using namespace niobium::fhetch;
     auto& cc = niobium::compiler();
     const auto& mod_map = address_modulus_map();
