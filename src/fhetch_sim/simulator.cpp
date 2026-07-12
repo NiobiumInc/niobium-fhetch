@@ -611,6 +611,11 @@ void Simulator::store_polynomial(uint64_t address,
     impl_->memory.set(address, values, modulus);
 }
 
+void Simulator::store_polynomial(uint64_t address, std::vector<uint64_t>&& values,
+                                 uint64_t modulus) {
+    impl_->memory.set_owned(address, std::move(values), modulus);
+}
+
 SimResult Simulator::run() {
     if (impl_->ring_dim == 0) {
         std::cerr << "[FHETCH_SIM] ring dimension not set" << std::endl;

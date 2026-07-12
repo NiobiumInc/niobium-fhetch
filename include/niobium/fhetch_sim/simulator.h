@@ -52,8 +52,11 @@ public:
     bool load_trace(const std::filesystem::path& trace_file);
 
     /// Store a polynomial in simulator memory at the given address.
-    /// Used to populate inputs before running.
+    /// Used to populate inputs before running. The rvalue overload
+    /// donates the buffer instead of copying.
     void store_polynomial(uint64_t address, const std::vector<uint64_t>& values,
+                          uint64_t modulus);
+    void store_polynomial(uint64_t address, std::vector<uint64_t>&& values,
                           uint64_t modulus);
 
     /// Run the loaded trace.
