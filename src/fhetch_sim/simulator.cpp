@@ -676,10 +676,27 @@ void Simulator::compute_liveness() {
         }
     }
 
+    std::vector<std::vector<uint64_t>> free_after(insts.size());
+
+    // Dead-write scan: a write with no read anywhere, or whose address's
+    // last read precedes it, produces a value nothing consumes — free it
+    // at the writing instruction. Near-SSA traces make this the dominant
+    // class (every value chain's final version). A write AT the last-read
+    // instruction (dest==src aliasing) is not dead and is handled by the
+    // read schedule below; an address freed here is simply re-created by
+    // reserve_dest if a later write reuses it, then re-freed the same way.
+    for (size_t i = 0; i < insts.size(); ++i) {
+        auto u = Impl::classify_uses(insts[i]);
+        if (!u.writes || u.write == 0) continue;
+        if (impl_->live_out_.count(u.write) != 0U) continue;
+        auto it = last_use.find(u.write);
+        if (it == last_use.end() || it->second < i)
+            free_after[i].push_back(u.write);
+    }
+
     // Schedule a memory.erase() at the end of each address's last-use
     // instruction. The kernel for that instruction has already read
     // its sources by the time the execute loop consults free_after_.
-    std::vector<std::vector<uint64_t>> free_after(insts.size());
     for (const auto& [addr, death] : last_use) {
         free_after[death].push_back(addr);
     }
