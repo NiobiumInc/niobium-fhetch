@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdlib>
 #include <cstdint>
 #include <iostream>
 #include <sstream>
@@ -102,10 +103,22 @@ static bool parse_named_uint(const std::string& tok, const std::string& prefix, 
 // ============================================================================
 
 ParsedTrace parse_trace(const std::string& trace_text) {
-    ParsedTrace result;
     std::istringstream stream(trace_text);
+    return parse_trace_stream(stream);
+}
+
+ParsedTrace parse_trace_stream(std::istream& stream) {
+    ParsedTrace result;
     std::string line;
     int line_num = 0;
+
+    // raw_line is diagnostics-only (error/warning context, the
+    // NIOBIUM_DEBUG_INSTR dump); retaining a copy of every line costs
+    // GBs on large traces (~1.6 GB at 12M instructions), so keep it
+    // only when the debug dump that needs it is enabled. Errors and
+    // warnings always carry the line number.
+    const char* dbg = std::getenv("NIOBIUM_DEBUG_INSTR");
+    const bool keep_raw = dbg != nullptr && *dbg != '\0';
 
     while (std::getline(stream, line)) {
         line_num++;
@@ -162,7 +175,7 @@ ParsedTrace parse_trace(const std::string& trace_text) {
 
         Instruction inst;
         inst.opcode = it->second;
-        inst.raw_line = trimmed;
+        if (keep_raw) inst.raw_line = trimmed;
         inst.line_number = line_num;
 
         // Collect remaining tokens

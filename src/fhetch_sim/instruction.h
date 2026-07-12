@@ -43,7 +43,9 @@ struct Instruction {
     std::optional<uint64_t> offset; // Rotation offset
     std::optional<uint64_t> omega;  // NTT root of unity
     std::string comment;            // Comment text (for COMMENT opcode)
-    std::string raw_line;           // Original text
+    std::string raw_line;           // Original text; populated only when
+                                    // NIOBIUM_DEBUG_INSTR is set (costs GBs
+                                    // on large traces otherwise)
     int line_number = 0;
 };
 
@@ -57,6 +59,10 @@ struct ParsedTrace {
 /// Reads the modulus table and instruction section.
 /// @return parsed trace, or empty on failure.
 ParsedTrace parse_trace(const std::string& trace_text);
+
+/// Streaming variant: parses line-by-line without materializing the
+/// whole trace text (a .fhetch file can run to GBs).
+ParsedTrace parse_trace_stream(std::istream& in);
 
 /// What addresses an instruction reads and writes. Shared by the
 /// simulator's liveness pass and the budget-mode UseIndex. FHETCH

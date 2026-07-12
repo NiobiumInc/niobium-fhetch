@@ -576,9 +576,9 @@ bool Simulator::load_trace(const std::filesystem::path& trace_file) {
         std::cerr << "[FHETCH_SIM] Cannot open: " << trace_file << std::endl;
         return false;
     }
-    std::string content((std::istreambuf_iterator<char>(in)),
-                        std::istreambuf_iterator<char>());
-    impl_->trace = parse_trace(content);
+    // Parse straight off the stream: materializing the text first costs
+    // two transient full-trace copies (GBs on large traces).
+    impl_->trace = parse_trace_stream(in);
 
     std::cout << "[FHETCH_SIM] Loaded: " << trace_file << "\n"
               << "  Modulus table: " << impl_->trace.modulus_table.size() << " entries\n"
