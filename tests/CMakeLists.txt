@@ -76,3 +76,13 @@ set_openfhe_rpath(automorph_alias_test)
 add_executable(simulator_liveness simulator_liveness/test.cpp)
 target_link_libraries(simulator_liveness PRIVATE niobium_fhetch)
 set_openfhe_rpath(simulator_liveness)
+
+# ==============================================================================
+# Budget mode: SpillFile / UseIndex units + budget-equivalence keystone.
+# ==============================================================================
+
+add_executable(memory_model memory_model/test.cpp)
+target_link_libraries(memory_model PRIVATE niobium_fhetch)
+# Unit-tests internal budget-mode components directly.
+target_include_directories(memory_model PRIVATE ${PROJECT_SOURCE_DIR}/src/fhetch_sim)
+set_openfhe_rpath(memory_model)

@@ -7,6 +7,9 @@
 #include "niobium/fhetch_sim/simulator.h"
 #include "instruction.h"
 #include "memory.h"
+#include "residency.h"
+#include "rss.h"
+#include "use_index.h"
 
 #include <chrono>
 #include <cstdint>
@@ -63,70 +66,10 @@ struct Simulator::Impl {
     // Addresses that must never be freed (probe outputs, etc.).
     std::unordered_set<uint64_t> live_out_;
 
-    // What addresses an instruction reads and writes. The liveness
-    // pass uses this to find each address's last read. FHETCH
-    // instructions have at most two source operands (src1, src2), so
-    // `reads` is a fixed two-slot array; `n_reads` tells the caller
-    // how many of those slots are populated.
-    struct InstUses {
-        uint64_t write;     // dest address; meaningful iff writes==true
-        bool writes;        // true if this instruction writes to mem_
-        uint64_t reads[2];  // source addresses; only first n_reads valid
-        int n_reads;        // 0, 1, or 2
-    };
-
-    // Decode `inst` into the addresses it reads and writes.
-    static InstUses classify_uses(const Instruction& inst) {
-        switch (inst.opcode) {
-        // No-ops: comments, unknowns, halt, and unimplemented stubs
-        // (execute() runs these as bare `ok = true`, no memory.set, so
-        // for liveness they neither read nor write).
-        case OpCode::COMMENT:
-        case OpCode::UNKNOWN:
-        case OpCode::HALT:
-        case OpCode::SR_PERMUTE:
-        case OpCode::SR_AUTOMORPH_COEFF:
-        case OpCode::SR_NEGP_NI:
-        case OpCode::SR_FT:
-        case OpCode::SR_IFT:
-        case OpCode::SR_ADDP_NI:
-        case OpCode::SR_SUBP_NI:
-        case OpCode::SR_MULP_NI:
-        case OpCode::SR_ADDPS_NI:
-        case OpCode::SR_SUBPS_NI:
-        case OpCode::SR_MULPS_NI:
-        case OpCode::SR_ADDPS_COEFF_NI:
-        case OpCode::SR_SUBPS_COEFF_NI:
-            return {.write = 0, .writes = false, .reads = {0, 0}, .n_reads = 0};
-
-        // sr_mulps with imm=0 writes a zero vector and reads nothing
-        // (see exec_mulps); the other immediate-form ops read src1.
-        case OpCode::SR_MULPS:
-            return inst.immediate == 0
-                ? InstUses{.write = inst.dest, .writes = true,
-                           .reads = {0, 0}, .n_reads = 0}
-                : InstUses{.write = inst.dest, .writes = true,
-                           .reads = {inst.src1, 0}, .n_reads = 1};
-
-        // One-source ops: write dest, read src1.
-        case OpCode::SR_NEGP:
-        case OpCode::SR_NTT:
-        case OpCode::SR_INTT:
-        case OpCode::SR_AUTOMORPH_EVAL:
-        case OpCode::SR_ROT_AUTOMORPH_COEFF:
-        case OpCode::SR_ADDPS:
-        case OpCode::SR_SUBPS:
-        case OpCode::SR_ADDPS_COEFF:
-        case OpCode::SR_SUBPS_COEFF:
-            return {.write = inst.dest, .writes = true,
-                    .reads = {inst.src1, 0}, .n_reads = 1};
-
-        // Two-source arithmetic (sr_addp / sr_subp / sr_mulp).
-        default:
-            return {.write = inst.dest, .writes = true,
-                    .reads = {inst.src1, inst.src2}, .n_reads = 2};
-        }
-    }
+    // Budget mode (set_memory_budget): bounded residency with exact
+    // Belady eviction; null when running unbounded (the default).
+    std::unique_ptr<ResidencyManager> residency;
+    std::shared_ptr<PolySource> poly_source;
 
     // Get polynomial from memory, returning zero-initialized if missing
     const std::vector<uint64_t>& get_or_zero(uint64_t addr,
@@ -467,6 +410,16 @@ struct Simulator::Impl {
             const auto& inst = trace.instructions[i];
             bool ok = true;
 
+            // Budget mode: fault this instruction's reads in, reserve the
+            // dest write-only, evict to budget. All residency changes
+            // happen here at the boundary — never mid-kernel, so kernels
+            // may hold references into the memory map.
+            InstUses uses{};
+            if (residency) {
+                uses = classify_uses(inst);
+                residency->begin_instruction(static_cast<uint32_t>(i), uses);
+            }
+
             switch (inst.opcode) {
             case OpCode::SR_ADDP:        ok = exec_addp(inst);  break;
             case OpCode::SR_SUBP:        ok = exec_subp(inst);  break;
@@ -539,11 +492,17 @@ struct Simulator::Impl {
             // at its largest, just after this instruction wrote its dest.
             if (memory.size() > peak_mem) peak_mem = memory.size();
 
-            // Release addresses whose last use was this instruction.
-            // free_after_ is empty when NIOBIUM_DISABLE_SIM_FREES=1
-            // skipped compute_liveness; otherwise it is sized to the
-            // instruction count and the bound is always satisfied.
-            if (i < free_after_.size()) {
+            if (residency) {
+                // Budget mode: retire the operands (advance next-use
+                // cursors, drop dead polys, mark the dest dirty). The
+                // free_after_ schedule is not used — dead polys fall out
+                // of the exact next-use index at the same instructions.
+                residency->end_instruction(static_cast<uint32_t>(i), uses);
+            } else if (i < free_after_.size()) {
+                // Release addresses whose last use was this instruction.
+                // free_after_ is empty when NIOBIUM_DISABLE_SIM_FREES=1
+                // skipped compute_liveness; otherwise it is sized to the
+                // instruction count and the bound is always satisfied.
                 for (uint64_t a : free_after_[i]) memory.erase(a);
             }
 
@@ -552,7 +511,13 @@ struct Simulator::Impl {
             if (std::chrono::duration_cast<std::chrono::seconds>(now - last_report).count() >= 2) {
                 int pct = static_cast<int>(100 * (i + 1) / total);
                 std::cout << "\r[FHETCH_SIM] Progress: " << pct << "% ("
-                          << (i + 1) << "/" << total << ")" << std::flush;
+                          << (i + 1) << "/" << total << ")";
+                if (residency) {
+                    residency->note_rss(current_rss_mb());
+                    std::cout << " resident " << memory.size() << " polys, RSS "
+                              << current_rss_mb() << " MiB";
+                }
+                std::cout << std::flush;
                 last_report = now;
             }
         }
@@ -572,6 +537,22 @@ struct Simulator::Impl {
                   << " polys (~" << std::fixed << std::setprecision(2)
                   << peak_mem * mib_per_poly << " MiB at N=" << ring_dim << ")"
                   << ", final size: " << memory.size() << std::endl;
+
+        if (residency) {
+            residency->note_rss(current_rss_mb());
+            const auto& ms = residency->stats();
+            std::cout << "[FHETCH_SIM] Memory: peak resident "
+                      << ms.peak_resident_polys << " polys (~"
+                      << ms.peak_resident_polys * mib_per_poly << " MiB), faults "
+                      << (ms.faults_source + ms.faults_spill) << " (source "
+                      << ms.faults_source << ", spill " << ms.faults_spill
+                      << "), evictions "
+                      << (ms.evictions_clean + ms.evictions_spilled) << " (clean "
+                      << ms.evictions_clean << ", spilled " << ms.evictions_spilled
+                      << "), spill peak "
+                      << ms.peak_spill_bytes / (1024.0 * 1024.0)
+                      << " MiB, peak RSS " << ms.peak_rss_mb << " MiB" << std::endl;
+        }
 
         return {executed, error_count, elapsed};
     }
@@ -609,11 +590,45 @@ void Simulator::store_polynomial(uint64_t address,
                                  const std::vector<uint64_t>& values,
                                  uint64_t modulus) {
     impl_->memory.set(address, values, modulus);
+    if (impl_->residency) impl_->residency->notify_stored(address);
 }
 
 void Simulator::store_polynomial(uint64_t address, std::vector<uint64_t>&& values,
                                  uint64_t modulus) {
     impl_->memory.set_owned(address, std::move(values), modulus);
+    if (impl_->residency) impl_->residency->notify_stored(address);
+}
+
+void Simulator::set_memory_budget(const MemoryBudgetOptions& opts) {
+    if (opts.budget_bytes == 0) {
+        impl_->residency.reset();
+        return;
+    }
+    if (impl_->ring_dim == 0 || impl_->trace.instructions.empty()) {
+        std::cerr << "[FHETCH_SIM] set_memory_budget: call after "
+                     "set_ring_dimension() and load_trace()" << std::endl;
+        return;
+    }
+    auto spill_dir = opts.spill_dir.empty() ? std::filesystem::current_path()
+                                            : opts.spill_dir;
+    impl_->residency = std::make_unique<ResidencyManager>(
+        impl_->memory, impl_->ring_dim, opts.budget_bytes, spill_dir,
+        impl_->poly_source, impl_->live_out_);
+    UseIndex idx;
+    idx.build(impl_->trace);
+    impl_->residency->set_use_index(std::move(idx));
+    std::cout << "[FHETCH_SIM] Memory budget: "
+              << opts.budget_bytes / (1024.0 * 1024.0) << " MiB ("
+              << impl_->residency->budget_polys() << " polys at N="
+              << impl_->ring_dim << "), spill dir " << spill_dir << std::endl;
+}
+
+void Simulator::set_poly_source(std::shared_ptr<PolySource> source) {
+    impl_->poly_source = std::move(source);
+}
+
+MemoryStats Simulator::memory_stats() const {
+    return impl_->residency ? impl_->residency->stats() : MemoryStats{};
 }
 
 SimResult Simulator::run() {
@@ -625,12 +640,18 @@ SimResult Simulator::run() {
 }
 
 std::vector<uint64_t> Simulator::get_polynomial(uint64_t address) const {
+    // Budget mode: the address may have been evicted (live-out polys can
+    // spill); fault it back for readback.
+    if (impl_->residency && !impl_->memory.is_initialized(address))
+        impl_->residency->fault_for_read(address);
     if (impl_->memory.is_initialized(address))
         return impl_->memory.get(address).values;
     return {};
 }
 
 uint64_t Simulator::get_modulus(uint64_t address) const {
+    if (impl_->residency && !impl_->memory.is_initialized(address))
+        impl_->residency->fault_for_read(address);
     return impl_->memory.get(address).modulus;
 }
 
@@ -642,7 +663,7 @@ std::vector<uint64_t> Simulator::get_read_before_write_addresses() const {
     std::set<uint64_t> written;
     std::vector<uint64_t> rbw;
     for (const auto& inst : impl_->trace.instructions) {
-        auto u = Impl::classify_uses(inst);
+        auto u = classify_uses(inst);
         for (int i = 0; i < u.n_reads; ++i) {
             uint64_t a = u.reads[i];
             if (!a) continue;
@@ -660,6 +681,12 @@ void Simulator::set_live_out_addresses(const std::vector<uint64_t>& addrs) {
 }
 
 void Simulator::compute_liveness() {
+    // Budget mode owns freeing: dead polys fall out of the exact
+    // next-use index at the same instructions this schedule would use.
+    if (impl_->residency) {
+        impl_->free_after_.clear();
+        return;
+    }
     // Opt-out for A/B comparison: leave free_after_ empty.
     if (std::getenv("NIOBIUM_DISABLE_SIM_FREES")) {
         impl_->free_after_.clear();
@@ -672,7 +699,7 @@ void Simulator::compute_liveness() {
     // last read. Live-out probes are excluded so they never get freed.
     std::unordered_map<uint64_t, size_t> last_use;
     for (size_t i = 0; i < insts.size(); ++i) {
-        auto u = Impl::classify_uses(insts[i]);
+        auto u = classify_uses(insts[i]);
         for (int j = 0; j < u.n_reads; ++j) {
             uint64_t a = u.reads[j];
             if (a == 0) continue;
@@ -691,7 +718,7 @@ void Simulator::compute_liveness() {
     // read schedule below; an address freed here is simply re-created by
     // reserve_dest if a later write reuses it, then re-freed the same way.
     for (size_t i = 0; i < insts.size(); ++i) {
-        auto u = Impl::classify_uses(insts[i]);
+        auto u = classify_uses(insts[i]);
         if (!u.writes || u.write == 0) continue;
         if (impl_->live_out_.count(u.write) != 0U) continue;
         auto it = last_use.find(u.write);

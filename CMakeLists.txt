@@ -90,7 +90,10 @@ set(LIB_SOURCES
     src/fhetch_api.cpp
     src/fhetch_parser.cpp
     src/fhetch_sim/instruction.cpp
+    src/fhetch_sim/residency.cpp
     src/fhetch_sim/simulator.cpp
+    src/fhetch_sim/spill_file.cpp
+    src/fhetch_sim/use_index.cpp
     src/local_replay.cpp
     src/probes.cpp
     src/trace_writer.cpp
