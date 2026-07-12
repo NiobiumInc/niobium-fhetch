@@ -744,13 +744,19 @@ bool Compiler::replay() {
     // the in-memory captured_inputs are incomplete. Instead: refresh any input
     // files that changed since record (mtime) onto their recorded addresses,
     // then dispatch a DISK-based replay that reads the refreshed project —
-    // local via the standalone fhetch_driver, remote via the compiler forwarder.
-    // result() then reads serialized_probes/<name>.ct for both.
+    // local via the bundled fhetch_sim project worker, remote via the compiler
+    // forwarder. Setting NBCC_FHETCH_DRIVER opts local replay into the
+    // fhetch_driver roundtrip harness instead (re-drives the trace through the
+    // recording API — an API-coverage check, far heavier on memory).
+    // result() then reads serialized_probes/<name>.ct for all of them.
     if (impl_->auto_tagging) {
         refresh_stale_inputs();
         if (impl_->target != "local")
             return dispatch_to_compiler_target();
-        return run_local_fhetch_driver();
+        if (const char* drv = std::getenv("NBCC_FHETCH_DRIVER"); drv != nullptr && *drv != '\0')
+            return run_local_fhetch_driver();
+        return replay_project("local", get_program_directory(), impl_->opt_level,
+                              /*niobium_hw=*/false);
     }
 
     // ----- Target != local: hand the fhetch project off to the compiler -----
