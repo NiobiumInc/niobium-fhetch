@@ -273,6 +273,8 @@ make test-simple-fhetch-release
 
 `tests/fhetch_driver/` ships a standalone executable that reads a `.fhetch` trace from disk and re-drives it through the FHETCH API, producing a secondary trace that is replayed through the simulator.
 
+Cooperative `Compiler::replay()` with `--target local` dispatches to the `fhetch_sim` project worker by default (located via `NBCC_FHETCH_SIM`, else `fhetch_sim` on `PATH`), which replays the recorded project directly. Setting `NBCC_FHETCH_DRIVER` opts that dispatch into this roundtrip harness instead — useful as an API-coverage check, but far heavier: the re-drive materializes every live-in input three times over and re-records the full trace.
+
 The parser itself is a public library component — `include/niobium/fhetch_parser.h` + `src/fhetch_parser.cpp` — so other callers can consume it directly via `libnbfhetch`. Build-gated by `NIOBIUM_FHETCH_WITH_TESTS=ON`.
 
 ```bash
