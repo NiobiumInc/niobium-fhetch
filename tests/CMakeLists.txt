@@ -68,3 +68,11 @@ set_openfhe_rpath(plaintext_add_decrypt)
 add_executable(automorph_alias_test automorph_alias_test/test.cpp)
 target_link_libraries(automorph_alias_test PRIVATE niobium_fhetch)
 set_openfhe_rpath(automorph_alias_test)
+
+# ==============================================================================
+# Simulator liveness free schedule (last-read + dead-write frees).
+# ==============================================================================
+
+add_executable(simulator_liveness simulator_liveness/test.cpp)
+target_link_libraries(simulator_liveness PRIVATE niobium_fhetch)
+set_openfhe_rpath(simulator_liveness)
