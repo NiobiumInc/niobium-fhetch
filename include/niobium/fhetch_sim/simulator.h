@@ -19,11 +19,30 @@
 
 namespace niobium::fhetch_sim {
 
+class PolySource;
+
 /// Result of running the simulator.
 struct SimResult {
     size_t instructions_executed = 0;
     size_t errors = 0;
     double elapsed_seconds = 0.0;
+};
+
+/// Bounded-residency configuration (see Simulator::set_memory_budget).
+struct MemoryBudgetOptions {
+    uint64_t budget_bytes = 0;        ///< 0 = unbounded (legacy behavior).
+    std::filesystem::path spill_dir;  ///< For evicted computed polys; empty = cwd.
+};
+
+/// Counters reported by Simulator::memory_stats() in budget mode.
+struct MemoryStats {
+    uint64_t faults_source = 0;      ///< polys loaded from the PolySource
+    uint64_t faults_spill = 0;       ///< polys restored from the spill file
+    uint64_t evictions_clean = 0;    ///< dropped without writing (reloadable)
+    uint64_t evictions_spilled = 0;  ///< written to the spill file first
+    uint64_t peak_resident_polys = 0;
+    uint64_t peak_spill_bytes = 0;
+    long peak_rss_mb = 0;
 };
 
 /// FHETCH instruction-set simulator.
@@ -102,6 +121,24 @@ public:
     /// after the instruction at that index. Used by test_simulator_liveness;
     /// production callers should not rely on this.
     const std::vector<std::vector<uint64_t>>& get_free_after_for_test() const;
+
+    /// Bound resident polynomial memory to `opts.budget_bytes`: reads are
+    /// faulted in on demand (spill file first, then the PolySource), the
+    /// eviction victim is always the resident poly with the farthest next
+    /// use (exact — the whole trace is known), and evicted computed values
+    /// spill to a per-run file in `opts.spill_dir`. Replaces
+    /// compute_liveness() — dead polys are freed at the same instructions
+    /// by the next-use index. Call AFTER load_trace() and
+    /// set_live_out_addresses(), BEFORE store_polynomial()/run().
+    /// Results are bit-identical to an unbounded run.
+    void set_memory_budget(const MemoryBudgetOptions& opts);
+
+    /// Backing store for lazily loaded inputs/keys in budget mode.
+    /// Call before set_memory_budget().
+    void set_poly_source(std::shared_ptr<PolySource> source);
+
+    /// Budget-mode counters (zeros when unbounded).
+    MemoryStats memory_stats() const;
 
 private:
     struct Impl;
