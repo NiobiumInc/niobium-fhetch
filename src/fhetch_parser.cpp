@@ -199,6 +199,17 @@ struct Driver {
         return ins->second;
     }
 
+    // Source operand of a zero-init (sr_mulps imm==0): the op reads
+    // nothing, so never consult DriveInputs and never tag an input —
+    // just hand back a hollow placeholder for the API call.
+    Polynomial& get_or_create_zero_src(uint64_t file_addr) {
+        auto it = polys.find(file_addr);
+        if (it != polys.end()) return it->second;
+        auto [ins, _] = polys.emplace(
+            file_addr, Polynomial::zeros(ring_dim, Format::Evaluation));
+        return ins->second;
+    }
+
     // Store the FHETCH API's output under the input file's destination
     // address, so later instructions that reference it resolve correctly.
     // If the caller marked this destination as an output probe via
@@ -334,7 +345,14 @@ bool parse_line(const std::string& raw, int line_num, Driver& drv) {
             drv.stats.skipped_lines++; return false;
         }
         uint64_t q = drv.resolve(m);
-        const Polynomial& a = drv.get_or_create_src(s1);
+        // sr_mulps with imm==0 is a zero-init: it writes zeros and reads
+        // nothing (the simulator's classify_uses agrees). Do not treat its
+        // source operand as a live-in input — the recorded idiom aliases
+        // src to dest, and registering a placeholder input per zero-init
+        // materializes hundreds of thousands of dense zero polys at sync.
+        const Polynomial& a = (op == OpCode::SR_MULPS && imm == 0)
+                                  ? drv.get_or_create_zero_src(s1)
+                                  : drv.get_or_create_src(s1);
         Scalar s = Scalar::from_int(imm);
         Polynomial r;
         switch (op) {
