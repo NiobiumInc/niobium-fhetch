@@ -4,6 +4,7 @@
 // Implementation of the disk-driven local replay declared in local_replay.h.
 
 #include "local_replay.h"
+#include "replay_poly_source.h"
 
 #include "niobium/fhetch_parser.h"  // DriveInputs (used directly below)
 #include "niobium/fhetch_sim/simulator.h"
@@ -34,7 +35,8 @@ using DCRTPoly = lbcrypto::DCRTPoly;
 // The .bin/.ids cereal loaders below are lifted verbatim from
 // tests/fhetch_driver/main.cpp so the worker and that (gated) test share one
 // copy of the on-disk layout, which must track the auto_facade writers.
-namespace {
+// Exposed via local_replay.h so the lazy DiskPolySource shares them too.
+namespace niobium::fhetch {
 
 // .ids layout: [uint64_t count][uint64_t id_0]...
 std::vector<uint64_t> read_ids(const fs::path& p) {
@@ -48,6 +50,7 @@ std::vector<uint64_t> read_ids(const fs::path& p) {
     return v;
 }
 
+namespace {
 // Extract per-tower (addr, values, modulus) triples from a DCRTPoly; the .ids
 // iterator provides the FHETCH address for each tower in order.
 void extract_dcrt_towers(const DCRTPoly& dcrt,
@@ -65,6 +68,7 @@ void extract_dcrt_towers(const DCRTPoly& dcrt,
         sink(addr, std::move(out), modulus);
     }
 }
+}  // namespace
 
 // .input_NAME.bin: uint32 instances; uint8 payload_type; uint32 num_polys;
 // DCRTPoly * num_polys.
@@ -184,7 +188,7 @@ bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
     return true;
 }
 
-}  // namespace
+}  // namespace niobium::fhetch
 
 namespace niobium {
 namespace fhetch {
@@ -403,6 +407,11 @@ bool register_crypto_context(const fs::path& dir) {
 }  // namespace
 
 bool run_local_replay_from_project(const fs::path& dir) {
+    return run_local_replay_from_project(dir, LocalReplayOptions{});
+}
+
+bool run_local_replay_from_project(const fs::path& dir,
+                                   const LocalReplayOptions& opts) {
     if (!fs::is_directory(dir)) {
         std::cerr << "[fhetch_sim] not a directory: " << dir << std::endl;
         return false;
@@ -417,17 +426,35 @@ bool run_local_replay_from_project(const fs::path& dir) {
         std::cerr << "[fhetch_sim] failed to load trace " << idx.trace_file << std::endl;
         return false;
     }
-    if (!populate_inputs(dir, idx.prog, sim)) return false;
 
     std::vector<NamedOutput> outputs;
     if (!read_output_probes(dir, idx.prog, outputs)) return false;
 
-    // Pin every output address so liveness leaves it in memory for readback.
+    // Pin every output address so it stays recoverable for readback
+    // (unbounded: never freed; budget mode: may spill, faults back).
     std::vector<uint64_t> live_out;
     for (const auto& [name, addr_ids] : outputs)
         live_out.insert(live_out.end(), addr_ids.begin(), addr_ids.end());
     sim.set_live_out_addresses(live_out);
-    sim.compute_liveness();
+
+    if (opts.mem_budget_mb > 0) {
+        // Bounded: no preload — inputs/keys fault in through the lazy
+        // disk source; budget mode owns freeing (no compute_liveness).
+        std::string err;
+        auto source = DiskPolySource::open(
+            dir, idx.prog, idx.ring_dim,
+            opts.cache_dir.empty() ? dir : opts.cache_dir, &err);
+        if (!source) {
+            std::cerr << "[fhetch_sim] " << err << std::endl;
+            return false;
+        }
+        sim.set_poly_source(source);
+        sim.set_memory_budget({opts.mem_budget_mb * 1024ULL * 1024ULL,
+                               opts.spill_dir.empty() ? dir : opts.spill_dir});
+    } else {
+        if (!populate_inputs(dir, idx.prog, sim)) return false;
+        sim.compute_liveness();
+    }
 
     auto result = sim.run();
     if (result.errors > 0) {

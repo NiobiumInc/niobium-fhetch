@@ -96,6 +96,7 @@ set(LIB_SOURCES
     src/fhetch_sim/use_index.cpp
     src/local_replay.cpp
     src/probes.cpp
+    src/replay_poly_source.cpp
     src/trace_writer.cpp
 )
 
