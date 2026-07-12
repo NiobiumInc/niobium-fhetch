@@ -58,4 +58,20 @@ struct ParsedTrace {
 /// @return parsed trace, or empty on failure.
 ParsedTrace parse_trace(const std::string& trace_text);
 
+/// What addresses an instruction reads and writes. Shared by the
+/// simulator's liveness pass and the budget-mode UseIndex. FHETCH
+/// instructions have at most two source operands (src1, src2), so
+/// `reads` is a fixed two-slot array; `n_reads` tells the caller how
+/// many of those slots are populated.
+struct InstUses {
+    uint64_t write;     // dest address; meaningful iff writes==true
+    bool writes;        // true if this instruction writes to memory
+    uint64_t reads[2];  // source addresses; only first n_reads valid
+    int n_reads;        // 0, 1, or 2
+};
+
+/// Decode `inst` into the addresses it reads and writes. Must mirror the
+/// exec_* kernels in simulator.cpp (e.g. sr_mulps imm==0 is write-only).
+InstUses classify_uses(const Instruction& inst);
+
 }  // namespace niobium::fhetch_sim
