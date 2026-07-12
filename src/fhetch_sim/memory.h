@@ -43,7 +43,7 @@ public:
         elem.initialized = true;
     }
 
-    // No rvalue overload by design: the slot's buffer is retained
+    // No rvalue overload of set() by design: the slot's buffer is retained
     // across writes, so the kernel copies into the existing storage.
     void set(uint64_t address, const std::vector<uint64_t>& values, uint64_t modulus) {
         auto& out = reserve_dest(address);
@@ -51,6 +51,17 @@ public:
             std::copy(values.begin(), values.end(), out.begin());
         }
         commit_dest(address, modulus);
+    }
+
+    // Initial population may donate the buffer instead: the slot adopts
+    // it (sized to the ring dimension) and the retained-buffer property
+    // holds for every write from then on.
+    void set_owned(uint64_t address, std::vector<uint64_t>&& values, uint64_t modulus) {
+        auto& elem = mem_[address];
+        elem.values = std::move(values);
+        elem.values.resize(ring_dim_);
+        elem.modulus = modulus;
+        elem.initialized = true;
     }
 
     void erase(uint64_t address) {

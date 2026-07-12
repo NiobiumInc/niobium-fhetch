@@ -9,8 +9,11 @@
 
 #include "niobium/fhetch_parser.h"  // DriveInputs
 
+#include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace niobium {
 
@@ -25,9 +28,20 @@ void reconstruct_probes_in(const std::filesystem::path& dir);
 
 namespace fhetch {
 
+// Receives one polynomial tower as it is decoded from a .bin file. The
+// vector is the callee's to keep (loaders donate the buffer).
+using PolySink =
+    std::function<void(uint64_t addr, std::vector<uint64_t>&& values, uint64_t modulus)>;
+
 // Load the inputs (<prog>.inputs.json + .bin/.ids) and keys
-// (<prog>.{mk,rk,bp}.bin/.ids) recorded under `dir` into `inputs`, keyed by the
-// FHETCH address recorded in each .ids file.
+// (<prog>.{mk,rk,bp}.bin/.ids) recorded under `dir`, keyed by the FHETCH
+// address recorded in each .ids file. The sink forms stream each tower as
+// it is decoded (one DCRTPoly resident at a time); the DriveInputs forms
+// are wrappers that collect everything into `inputs.data`.
+bool load_source_inputs(const std::filesystem::path& dir, const std::string& prog,
+                        const PolySink& sink);
+bool load_source_keys(const std::filesystem::path& dir, const std::string& prog,
+                      const PolySink& sink);
 bool load_source_inputs(const std::filesystem::path& dir, const std::string& prog,
                         DriveInputs& inputs);
 bool load_source_keys(const std::filesystem::path& dir, const std::string& prog,
