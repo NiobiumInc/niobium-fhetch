@@ -1062,6 +1062,25 @@ static size_t extract_all_polys_from_dcrt(niobium::Compiler& compiler,
     return count;
 }
 
+void niobium::Compiler::release_openfhe_data_for_replay() {
+    // The cooperative replay worker reads the project from disk, so nothing
+    // in this process needs polynomial data anymore. Eval keys are the big
+    // item (rotation keys run to GBs); OpenFHE holds them in static maps,
+    // so the user's own CryptoContext handle does not keep them alive past
+    // these clears. g_stored_cc is deliberately kept: the factory
+    // registration it holds is what result()'s probe deserialization binds
+    // to, and it owns no key material.
+    g_stored_ciphertexts.clear();
+    g_stored_ciphertexts.shrink_to_fit();
+    lbcrypto::CryptoContextImpl<DCRTPoly>::ClearEvalMultKeys();
+    lbcrypto::CryptoContextImpl<DCRTPoly>::ClearEvalAutomorphismKeys();
+    lbcrypto::CryptoContextImpl<DCRTPoly>::ClearEvalSumKeys();
+    clear_captured_inputs();
+    std::cout << "[NIOBIUM] Released OpenFHE eval keys + captured inputs ahead of "
+                 "replay (release_openfhe_data_at_replay(false) to keep them)"
+              << std::endl;
+}
+
 void niobium::Compiler::refresh_all_inputs() {
     // Clear previously captured inputs — we're re-capturing everything
     // from the live OpenFHE objects at their current state.

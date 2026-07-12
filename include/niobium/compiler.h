@@ -238,6 +238,23 @@ class Compiler {
     /// Check if input streaming (drop buffered input values) is active.
     bool is_input_streaming() const;
 
+    /// Cooperative replay() delegates execution to a subprocess that reads
+    /// the project from disk, so the recording process no longer needs any
+    /// OpenFHE polynomial data — by default it releases everything it can
+    /// reach right before spawning the worker: SDK-retained ciphertexts,
+    /// buffered captured-input values, and ALL OpenFHE evaluation keys
+    /// (relinearization / rotation / sum — often multi-GB). Pass false to
+    /// opt out if this process keeps computing after replay(): further
+    /// Eval* calls, re-tagging live ciphertexts, or another record cycle
+    /// in the same process all need the released state. result() and
+    /// output serialization are unaffected (they read the reconstructed
+    /// probe files, not key material). Only cooperative (auto-tagging)
+    /// replay releases; in-process and epoch-recording flows never do.
+    void release_openfhe_data_at_replay(bool enabled = true);
+
+    /// Check whether cooperative replay() releases OpenFHE data (default true).
+    bool is_release_openfhe_data_at_replay() const;
+
     // ====================================================================
     // FHETCH MODE
     // ====================================================================
@@ -417,6 +434,11 @@ class Compiler {
     /// through the recording API (an API-coverage check); the default local
     /// path is the much lighter fhetch_sim --project via replay_project().
     bool run_local_fhetch_driver();
+
+    /// Drop SDK-retained ciphertexts, buffered captured-input values, and
+    /// every OpenFHE evaluation key before a cooperative subprocess replay
+    /// (defined in auto_facade.cpp, which owns the OpenFHE coupling).
+    void release_openfhe_data_for_replay();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
