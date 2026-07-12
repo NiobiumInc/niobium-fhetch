@@ -304,4 +304,56 @@ ParsedTrace parse_trace(const std::string& trace_text) {
     return result;
 }
 
+InstUses classify_uses(const Instruction& inst) {
+    switch (inst.opcode) {
+    // No-ops: comments, unknowns, halt, and unimplemented stubs
+    // (execute() runs these as bare `ok = true`, no memory.set, so
+    // for liveness they neither read nor write).
+    case OpCode::COMMENT:
+    case OpCode::UNKNOWN:
+    case OpCode::HALT:
+    case OpCode::SR_PERMUTE:
+    case OpCode::SR_AUTOMORPH_COEFF:
+    case OpCode::SR_NEGP_NI:
+    case OpCode::SR_FT:
+    case OpCode::SR_IFT:
+    case OpCode::SR_ADDP_NI:
+    case OpCode::SR_SUBP_NI:
+    case OpCode::SR_MULP_NI:
+    case OpCode::SR_ADDPS_NI:
+    case OpCode::SR_SUBPS_NI:
+    case OpCode::SR_MULPS_NI:
+    case OpCode::SR_ADDPS_COEFF_NI:
+    case OpCode::SR_SUBPS_COEFF_NI:
+        return {.write = 0, .writes = false, .reads = {0, 0}, .n_reads = 0};
+
+    // sr_mulps with imm=0 writes a zero vector and reads nothing
+    // (see exec_mulps); the other immediate-form ops read src1.
+    case OpCode::SR_MULPS:
+        return inst.immediate == 0
+            ? InstUses{.write = inst.dest, .writes = true,
+                       .reads = {0, 0}, .n_reads = 0}
+            : InstUses{.write = inst.dest, .writes = true,
+                       .reads = {inst.src1, 0}, .n_reads = 1};
+
+    // One-source ops: write dest, read src1.
+    case OpCode::SR_NEGP:
+    case OpCode::SR_NTT:
+    case OpCode::SR_INTT:
+    case OpCode::SR_AUTOMORPH_EVAL:
+    case OpCode::SR_ROT_AUTOMORPH_COEFF:
+    case OpCode::SR_ADDPS:
+    case OpCode::SR_SUBPS:
+    case OpCode::SR_ADDPS_COEFF:
+    case OpCode::SR_SUBPS_COEFF:
+        return {.write = inst.dest, .writes = true,
+                .reads = {inst.src1, 0}, .n_reads = 1};
+
+    // Two-source arithmetic (sr_addp / sr_subp / sr_mulp).
+    default:
+        return {.write = inst.dest, .writes = true,
+                .reads = {inst.src1, inst.src2}, .n_reads = 2};
+    }
+}
+
 }  // namespace niobium::fhetch_sim
