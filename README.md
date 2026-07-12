@@ -269,6 +269,20 @@ Run:
 make test-simple-fhetch-release
 ```
 
+### Bounded-memory replay (`--mem-budget-mb`)
+
+`fhetch_sim --project=<dir>` normally preloads every recorded input and holds computed values until their last read — fine when the trace's working set fits in RAM. For large workloads on small machines, budget mode bounds resident polynomial memory to a hard cap while producing **bit-identical** results:
+
+```bash
+fhetch_sim --project=<dir> --mem-budget-mb 2048 [--spill-dir DIR] [--cache-dir DIR]
+```
+
+(or environment: `NIOBIUM_FHETCH_MEM_BUDGET_MB`, `NIOBIUM_FHETCH_SPILL_DIR`, `NIOBIUM_FHETCH_CACHE_DIR` — useful when the replay worker is spawned by a host process.)
+
+How it stays exact: the whole trace is known before execution, so a one-pass use index gives every polynomial's true next use — eviction is Belady-optimal (farthest next use first), inputs/keys fault in from the project's `.bin` files on first read, and evicted *computed* values spill to a per-run scratch file (deleted on exit; crashes leak nothing). The multi-GB key archives are converted once into a flat `<prog>.<kind>.polycache` sidecar for random access, reused across runs and revalidated against the source file's size/mtime. Dead values are freed at the same instructions the default liveness pass would free them.
+
+Keep `--spill-dir`/`--cache-dir` on **local disk** (they default to the project dir). The budget is enforced on the simulator's poly ledger; total process RSS ≈ budget + trace/index metadata + OpenFHE statics (reported at the end of the run alongside fault/eviction/spill counters).
+
 ### Test harness — `fhetch_driver`
 
 `tests/fhetch_driver/` ships a standalone executable that reads a `.fhetch` trace from disk and re-drives it through the FHETCH API, producing a secondary trace that is replayed through the simulator.
