@@ -75,6 +75,11 @@ struct Compiler::Impl {
     // When true, drop the in-RAM copy of tagged input/key coefficient values
     // (the .bin is written to disk at tag time). See enable_input_streaming().
     bool input_streaming = false;
+    // When true (default), cooperative replay() releases SDK-retained
+    // ciphertexts, buffered captured inputs, and ALL OpenFHE eval keys
+    // before spawning the subprocess worker — the recording process no
+    // longer needs them. See release_openfhe_data_at_replay().
+    bool release_at_replay = true;
 
     // Epochs
     uint32_t epoch_id = 0;
@@ -655,6 +660,14 @@ bool Compiler::is_input_streaming() const {
     return impl_->input_streaming;
 }
 
+void Compiler::release_openfhe_data_at_replay(bool enabled) {
+    impl_->release_at_replay = enabled;
+}
+
+bool Compiler::is_release_openfhe_data_at_replay() const {
+    return impl_->release_at_replay;
+}
+
 // ============================================================================
 // FHETCH mode
 // ============================================================================
@@ -751,6 +764,12 @@ bool Compiler::replay() {
     // result() then reads serialized_probes/<name>.ct for all of them.
     if (impl_->auto_tagging) {
         refresh_stale_inputs();
+        // The worker reads everything from disk, so this process's OpenFHE
+        // data (incl. eval keys) is dead weight for the child's lifetime.
+        // Must run after refresh_stale_inputs(), which is disk-driven and
+        // needs none of the released state.
+        if (impl_->release_at_replay)
+            release_openfhe_data_for_replay();
         if (impl_->target != "local")
             return dispatch_to_compiler_target();
         if (const char* drv = std::getenv("NBCC_FHETCH_DRIVER"); drv != nullptr && *drv != '\0')
