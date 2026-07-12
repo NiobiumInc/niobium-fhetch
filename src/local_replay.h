@@ -17,10 +17,24 @@
 
 namespace niobium {
 
+// Bounded-memory options for run_local_replay_from_project.
+struct LocalReplayOptions {
+    // 0 = unbounded (eager input load, liveness frees only). Nonzero
+    // bounds resident polynomial memory: inputs/keys fault in lazily
+    // from the project's .bin files (keys via a one-time flat sidecar),
+    // evicted computed values spill to a per-run file, and the eviction
+    // policy is exact Belady over the trace. Results are bit-identical.
+    uint64_t mem_budget_mb = 0;
+    std::filesystem::path spill_dir;  // empty = project dir (keep it on local disk)
+    std::filesystem::path cache_dir;  // key sidecars; empty = project dir
+};
+
 // Drive the simulator over the on-disk project at `dir` and write
 // fhetch_replay_outputs.json + serialized_probes/<name>.ct into it. Returns
 // true on a zero-error run that produced at least one probe.
 bool run_local_replay_from_project(const std::filesystem::path& dir);
+bool run_local_replay_from_project(const std::filesystem::path& dir,
+                                   const LocalReplayOptions& opts);
 
 // Fill ciphertext_templates/<name>.template from fhetch_replay_outputs.json in
 // `dir` and serialize to serialized_probes/<name>.ct (defined in auto_facade.cpp).
@@ -46,6 +60,17 @@ bool load_source_inputs(const std::filesystem::path& dir, const std::string& pro
                         DriveInputs& inputs);
 bool load_source_keys(const std::filesystem::path& dir, const std::string& prog,
                       DriveInputs& inputs);
+
+// Per-file loaders (one .bin against its .ids address list), shared by
+// the eager path above and the lazy DiskPolySource. All stream: one
+// DCRTPoly resident at a time, each tower delivered through the sink.
+std::vector<uint64_t> read_ids(const std::filesystem::path& ids_path);
+bool load_input_bin(const std::filesystem::path& bin_path,
+                    const std::vector<uint64_t>& ids, const PolySink& sink);
+bool load_key_bin(const std::filesystem::path& bin_path,
+                  const std::vector<uint64_t>& ids, const PolySink& sink);
+bool load_bp_bin(const std::filesystem::path& bin_path,
+                 const std::vector<uint64_t>& ids, const PolySink& sink);
 
 }  // namespace fhetch
 }  // namespace niobium
