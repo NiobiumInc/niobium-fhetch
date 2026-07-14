@@ -1,6 +1,6 @@
 # Python bindings (niobium-fhetch)
 
-This repo builds the two native Python extensions behind the `niobium_client` wheel
+This repo builds the two native Python extensions behind the `niobium_sdk` wheel
 (which is assembled downstream in `niobium-client`):
 
 - **`openfhe`** — the vendored **openfhe-python** crypto module, rebuilt against
