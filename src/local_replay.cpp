@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -52,7 +53,7 @@ std::vector<uint64_t> read_ids(const fs::path& p) {
 void extract_dcrt_towers(const DCRTPoly& dcrt,
                          std::vector<uint64_t>::const_iterator& id_it,
                          std::vector<uint64_t>::const_iterator id_end,
-                         niobium::fhetch::DriveInputs& inputs) {
+                         const niobium::fhetch::PolySink& sink) {
     for (const auto& tower : dcrt.GetAllElements()) {
         if (id_it == id_end) return;
         uint64_t addr = *id_it++;
@@ -61,14 +62,14 @@ void extract_dcrt_towers(const DCRTPoly& dcrt,
         std::vector<uint64_t> out(vals.GetLength());
         for (size_t i = 0; i < vals.GetLength(); ++i)
             out[i] = vals[i].ConvertToInt();
-        inputs.data[addr] = {std::move(out), modulus};
+        sink(addr, std::move(out), modulus);
     }
 }
 
 // .input_NAME.bin: uint32 instances; uint8 payload_type; uint32 num_polys;
 // DCRTPoly * num_polys.
 bool load_input_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
-                    niobium::fhetch::DriveInputs& inputs) {
+                    const niobium::fhetch::PolySink& sink) {
     std::ifstream f(bin_path, std::ios::binary);
     if (!f.is_open()) return false;
     try {
@@ -84,7 +85,7 @@ bool load_input_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
         for (uint32_t i = 0; i < num_polys; ++i) {
             DCRTPoly dcrt;
             ar(dcrt);
-            extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
+            extract_dcrt_towers(dcrt, id_it, ids.end(), sink);
         }
     } catch (const std::exception& e) {
         std::cerr << "[fhetch_sim] failed to read " << bin_path << ": " << e.what() << std::endl;
@@ -96,7 +97,7 @@ bool load_input_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
 // .mk.bin / .rk.bin: uint32 num_keys; per key uint32 av_size, DCRTPoly*av_size,
 // uint32 bv_size, DCRTPoly*bv_size. The .ids flatten all keys' (A, B) towers.
 bool load_key_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
-                  niobium::fhetch::DriveInputs& inputs) {
+                  const niobium::fhetch::PolySink& sink) {
     std::ifstream f(bin_path, std::ios::binary);
     if (!f.is_open()) return false;
     try {
@@ -110,14 +111,14 @@ bool load_key_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
             for (uint32_t i = 0; i < av_size; ++i) {
                 DCRTPoly dcrt;
                 ar(dcrt);
-                extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
+                extract_dcrt_towers(dcrt, id_it, ids.end(), sink);
             }
             uint32_t bv_size = 0;
             ar(bv_size);
             for (uint32_t i = 0; i < bv_size; ++i) {
                 DCRTPoly dcrt;
                 ar(dcrt);
-                extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
+                extract_dcrt_towers(dcrt, id_it, ids.end(), sink);
             }
         }
     } catch (const std::exception& e) {
@@ -131,7 +132,7 @@ bool load_key_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
 // 2x 2D-DCRTPoly, 2x 1D-DCRTPoly. 2D: uint32 outer; per inner uint32 inner,
 // DCRTPoly... | 1D: uint32 size, DCRTPoly...
 bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
-                 niobium::fhetch::DriveInputs& inputs) {
+                 const niobium::fhetch::PolySink& sink) {
     std::ifstream f(bin_path, std::ios::binary);
     if (!f.is_open()) return false;
     try {
@@ -158,7 +159,7 @@ bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
                     for (uint32_t j = 0; j < inner_size; ++j) {
                         DCRTPoly dcrt;
                         ar(dcrt);
-                        extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
+                        extract_dcrt_towers(dcrt, id_it, ids.end(), sink);
                     }
                 }
             };
@@ -168,7 +169,7 @@ bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
                 for (uint32_t i = 0; i < size; ++i) {
                     DCRTPoly dcrt;
                     ar(dcrt);
-                    extract_dcrt_towers(dcrt, id_it, ids.end(), inputs);
+                    extract_dcrt_towers(dcrt, id_it, ids.end(), sink);
                 }
             };
             read_2d();  // m_U0hatTPreFFT
@@ -188,7 +189,7 @@ bool load_bp_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
 namespace niobium {
 namespace fhetch {
 
-bool load_source_inputs(const fs::path& dir, const std::string& prog, DriveInputs& inputs) {
+bool load_source_inputs(const fs::path& dir, const std::string& prog, const PolySink& sink) {
     fs::path idx_path = dir / (prog + ".inputs.json");
     if (!fs::exists(idx_path)) return true;  // a trace with no live-in inputs is fine
 
@@ -214,22 +215,38 @@ bool load_source_inputs(const fs::path& dir, const std::string& prog, DriveInput
             return false;
         }
         auto addr_ids = read_ids(ids_path);
-        if (!load_input_bin(bin_path, addr_ids, inputs)) return false;
+        if (!load_input_bin(bin_path, addr_ids, sink)) return false;
     }
     return true;
 }
 
-bool load_source_keys(const fs::path& dir, const std::string& prog, DriveInputs& inputs) {
+bool load_source_keys(const fs::path& dir, const std::string& prog, const PolySink& sink) {
     // mk/rk/bp are each optional; a present file that fails to load is an error.
     auto load_with = [&](const std::string& base, auto&& reader) -> bool {
         fs::path bin = dir / (prog + "." + base + ".bin");
         fs::path ids = dir / (prog + "." + base + ".ids");
         if (!fs::exists(bin) || !fs::exists(ids)) return true;
         auto addr_ids = read_ids(ids);
-        return reader(bin, addr_ids, inputs);
+        return reader(bin, addr_ids, sink);
     };
     return load_with("mk", load_key_bin) && load_with("rk", load_key_bin) &&
            load_with("bp", load_bp_bin);
+}
+
+namespace {
+PolySink collect_into(DriveInputs& inputs) {
+    return [&inputs](uint64_t addr, std::vector<uint64_t>&& values, uint64_t modulus) {
+        inputs.data[addr] = {std::move(values), modulus};
+    };
+}
+}  // namespace
+
+bool load_source_inputs(const fs::path& dir, const std::string& prog, DriveInputs& inputs) {
+    return load_source_inputs(dir, prog, collect_into(inputs));
+}
+
+bool load_source_keys(const fs::path& dir, const std::string& prog, DriveInputs& inputs) {
+    return load_source_keys(dir, prog, collect_into(inputs));
 }
 
 }  // namespace fhetch
@@ -267,21 +284,38 @@ bool read_project_index(const fs::path& dir, ProjectIndex& out) {
     return true;
 }
 
-// Load every recorded input + key into the simulator at its recorded address.
+// Stream recorded inputs + keys into the simulator at their recorded
+// addresses: one DCRTPoly is resident at a time and each tower's buffer
+// is donated to the simulator, so no DriveInputs-sized copy ever exists.
 // Inputs sit at their live-in addresses, so the in-process copy-lineage
-// fixpoint is unnecessary here.
+// fixpoint is unnecessary here — which also means polys the trace never
+// reads would only sit in memory until the end of the run; drop them.
+// Must run after sim.load_trace() (needs the trace's live-in set).
 bool populate_inputs(const fs::path& dir, const std::string& prog, fhetch_sim::Simulator& sim) {
-    fhetch::DriveInputs inputs;
-    if (!fhetch::load_source_inputs(dir, prog, inputs)) {
+    auto rbw = sim.get_read_before_write_addresses();
+    std::unordered_set<uint64_t> live_in(rbw.begin(), rbw.end());
+
+    size_t stored = 0;
+    size_t dropped = 0;
+    fhetch::PolySink sink = [&](uint64_t addr, std::vector<uint64_t>&& values,
+                                uint64_t modulus) {
+        if (live_in.count(addr) != 0U) {
+            sim.store_polynomial(addr, std::move(values), modulus);
+            ++stored;
+        } else {
+            ++dropped;
+        }
+    };
+    if (!fhetch::load_source_inputs(dir, prog, sink)) {
         std::cerr << "[fhetch_sim] failed to load inputs for " << prog << std::endl;
         return false;
     }
-    if (!fhetch::load_source_keys(dir, prog, inputs)) {
+    if (!fhetch::load_source_keys(dir, prog, sink)) {
         std::cerr << "[fhetch_sim] failed to load keys for " << prog << std::endl;
         return false;
     }
-    for (const auto& [addr, elem] : inputs.data)
-        sim.store_polynomial(addr, elem.values, elem.modulus);
+    std::cout << "[fhetch_sim] inputs: " << stored << " live-in polys stored, "
+              << dropped << " never-read polys dropped" << std::endl;
     return true;
 }
 

@@ -75,6 +75,11 @@ struct Compiler::Impl {
     // When true, drop the in-RAM copy of tagged input/key coefficient values
     // (the .bin is written to disk at tag time). See enable_input_streaming().
     bool input_streaming = false;
+    // When true (default), cooperative replay() releases SDK-retained
+    // ciphertexts, buffered captured inputs, and ALL OpenFHE eval keys
+    // before spawning the subprocess worker — the recording process no
+    // longer needs them. See release_openfhe_data_at_replay().
+    bool release_at_replay = true;
 
     // Epochs
     uint32_t epoch_id = 0;
@@ -655,6 +660,14 @@ bool Compiler::is_input_streaming() const {
     return impl_->input_streaming;
 }
 
+void Compiler::release_openfhe_data_at_replay(bool enabled) {
+    impl_->release_at_replay = enabled;
+}
+
+bool Compiler::is_release_openfhe_data_at_replay() const {
+    return impl_->release_at_replay;
+}
+
 // ============================================================================
 // FHETCH mode
 // ============================================================================
@@ -744,13 +757,25 @@ bool Compiler::replay() {
     // the in-memory captured_inputs are incomplete. Instead: refresh any input
     // files that changed since record (mtime) onto their recorded addresses,
     // then dispatch a DISK-based replay that reads the refreshed project —
-    // local via the standalone fhetch_driver, remote via the compiler forwarder.
-    // result() then reads serialized_probes/<name>.ct for both.
+    // local via the bundled fhetch_sim project worker, remote via the compiler
+    // forwarder. Setting NBCC_FHETCH_DRIVER opts local replay into the
+    // fhetch_driver roundtrip harness instead (re-drives the trace through the
+    // recording API — an API-coverage check, far heavier on memory).
+    // result() then reads serialized_probes/<name>.ct for all of them.
     if (impl_->auto_tagging) {
         refresh_stale_inputs();
+        // The worker reads everything from disk, so this process's OpenFHE
+        // data (incl. eval keys) is dead weight for the child's lifetime.
+        // Must run after refresh_stale_inputs(), which is disk-driven and
+        // needs none of the released state.
+        if (impl_->release_at_replay)
+            release_openfhe_data_for_replay();
         if (impl_->target != "local")
             return dispatch_to_compiler_target();
-        return run_local_fhetch_driver();
+        if (const char* drv = std::getenv("NBCC_FHETCH_DRIVER"); drv != nullptr && *drv != '\0')
+            return run_local_fhetch_driver();
+        return replay_project("local", get_program_directory(), impl_->opt_level,
+                              /*niobium_hw=*/false);
     }
 
     // ----- Target != local: hand the fhetch project off to the compiler -----

@@ -238,6 +238,23 @@ class Compiler {
     /// Check if input streaming (drop buffered input values) is active.
     bool is_input_streaming() const;
 
+    /// Cooperative replay() delegates execution to a subprocess that reads
+    /// the project from disk, so the recording process no longer needs any
+    /// OpenFHE polynomial data — by default it releases everything it can
+    /// reach right before spawning the worker: SDK-retained ciphertexts,
+    /// buffered captured-input values, and ALL OpenFHE evaluation keys
+    /// (relinearization / rotation / sum — often multi-GB). Pass false to
+    /// opt out if this process keeps computing after replay(): further
+    /// Eval* calls, re-tagging live ciphertexts, or another record cycle
+    /// in the same process all need the released state. result() and
+    /// output serialization are unaffected (they read the reconstructed
+    /// probe files, not key material). Only cooperative (auto-tagging)
+    /// replay releases; in-process and epoch-recording flows never do.
+    void release_openfhe_data_at_replay(bool enabled = true);
+
+    /// Check whether cooperative replay() releases OpenFHE data (default true).
+    bool is_release_openfhe_data_at_replay() const;
+
     // ====================================================================
     // FHETCH MODE
     // ====================================================================
@@ -255,7 +272,10 @@ class Compiler {
 
     /// Replay the recorded trace through the FHETCH simulator.
     /// Executes the .fhetch trace using OpenFHE modular arithmetic,
-    /// producing computed polynomial values.
+    /// producing computed polynomial values. Cooperative (auto-tagging)
+    /// sessions dispatch a disk-based subprocess replay: fhetch_sim
+    /// --project for target "local" (or, when NBCC_FHETCH_DRIVER is set,
+    /// the fhetch_driver roundtrip harness), nbcc_fhetch_replay otherwise.
     /// @return true if replay succeeded with zero errors.
     bool replay();
 
@@ -406,12 +426,19 @@ class Compiler {
     /// Returns true if the external driver succeeded and probes were written.
     bool dispatch_to_compiler_target();
 
-    /// Cooperative local replay: spawn the standalone fhetch_driver over the
-    /// (refreshed) project dir, reconstructing every recorded probe into
+    /// Opt-in cooperative local replay (only when NBCC_FHETCH_DRIVER is
+    /// set): spawn the fhetch_driver roundtrip harness over the (refreshed)
+    /// project dir, reconstructing every recorded probe into
     /// <program_dir>/serialized_probes/<name>.ct so result() reads them the
-    /// same way it does for the remote path. Driver path from the
-    /// NBCC_FHETCH_DRIVER env var (falls back to "fhetch_driver" on PATH).
+    /// same way it does for the remote path. The harness re-drives the trace
+    /// through the recording API (an API-coverage check); the default local
+    /// path is the much lighter fhetch_sim --project via replay_project().
     bool run_local_fhetch_driver();
+
+    /// Drop SDK-retained ciphertexts, buffered captured-input values, and
+    /// every OpenFHE evaluation key before a cooperative subprocess replay
+    /// (defined in auto_facade.cpp, which owns the OpenFHE coupling).
+    void release_openfhe_data_for_replay();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

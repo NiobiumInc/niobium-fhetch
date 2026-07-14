@@ -52,8 +52,11 @@ public:
     bool load_trace(const std::filesystem::path& trace_file);
 
     /// Store a polynomial in simulator memory at the given address.
-    /// Used to populate inputs before running.
+    /// Used to populate inputs before running. The rvalue overload
+    /// donates the buffer instead of copying.
     void store_polynomial(uint64_t address, const std::vector<uint64_t>& values,
+                          uint64_t modulus);
+    void store_polynomial(uint64_t address, std::vector<uint64_t>&& values,
                           uint64_t modulus);
 
     /// Run the loaded trace.
@@ -85,11 +88,13 @@ public:
     /// so write_replay_outputs() can still read them after execution finishes.
     void set_live_out_addresses(const std::vector<uint64_t>& addrs);
 
-    /// Liveness-driven free schedule: forward last_use scan, then a
-    /// memory.erase() scheduled one instruction after each address's
-    /// last read. Must be called after load_trace() and (optionally)
-    /// set_live_out_addresses(). `NIOBIUM_DISABLE_SIM_FREES` skips
-    /// the pass entirely.
+    /// Liveness-driven free schedule: a memory.erase() is scheduled at
+    /// each address's last read, and at every write whose value is never
+    /// read afterwards (dead stores and rewrites after the last read —
+    /// near-SSA traces retain hundreds of thousands of such buffers
+    /// otherwise). Must be called after load_trace() and (optionally)
+    /// set_live_out_addresses(); live-out addresses are never freed.
+    /// `NIOBIUM_DISABLE_SIM_FREES` skips the pass entirely.
     void compute_liveness();
 
     /// Test-only accessor: returns the per-instruction free schedule built

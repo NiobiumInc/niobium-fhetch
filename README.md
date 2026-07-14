@@ -2,6 +2,8 @@
 
 Open-source FHETCH Polynomial IR library and local simulator for the **Niobium Mistic** FHE accelerator.
 
+The IR interface implemented here follows the FHETCH Polynomial IR specification published at [fhetch.org](https://fhetch.org), extended with Niobium-specific additions (multi-residue gadgets, decomposition gadgets, CKKS bootstrap, and the session/replay tooling described below).
+
 This repository provides:
 
 1. **`fhetch_api.h`** — the complete FHETCH Polynomial IR instruction set as a C++ API (baseline ops, multi-residue gadgets, decomposition gadgets, CKKS bootstrap, file I/O).
@@ -59,6 +61,8 @@ In short: the `.fhetch` trace and the `niobium::fhetch::` API surface are the in
 ### `fhetch_api.h` — FHETCH Polynomial IR
 
 Defines every FHETCH Polynomial IR instruction as a C++ function. These are **not called directly by end-user application code** — they are called by the host integration (e.g. OpenFHE probes in `niobium-client`). Each call records one hardware instruction in the trace.
+
+The baseline instruction set implements the FHETCH Polynomial IR specification at [fhetch.org](https://fhetch.org); the multi-residue and decomposition gadgets, CKKS bootstrap, and optional operations below are Niobium extensions on top of that spec.
 
 Baseline instructions (map 1:1 to hardware ISA):
 
@@ -268,6 +272,8 @@ make test-simple-fhetch-release
 ### Test harness — `fhetch_driver`
 
 `tests/fhetch_driver/` ships a standalone executable that reads a `.fhetch` trace from disk and re-drives it through the FHETCH API, producing a secondary trace that is replayed through the simulator.
+
+Cooperative `Compiler::replay()` with `--target local` dispatches to the `fhetch_sim` project worker by default (located via `NBCC_FHETCH_SIM`, else `fhetch_sim` on `PATH`), which replays the recorded project directly. Setting `NBCC_FHETCH_DRIVER` opts that dispatch into this roundtrip harness instead — useful as an API-coverage check, but far heavier: the re-drive materializes every live-in input three times over and re-records the full trace.
 
 The parser itself is a public library component — `include/niobium/fhetch_parser.h` + `src/fhetch_parser.cpp` — so other callers can consume it directly via `libnbfhetch`. Build-gated by `NIOBIUM_FHETCH_WITH_TESTS=ON`.
 
