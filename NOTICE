@@ -2,13 +2,20 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 ============================================================
 
 Project: niobium-fhetch
-Generated: 2026-07-14
+Generated: 2026-07-16
 Tool: SCANOSS (snippet detection with License dataset)
-Components: 77
+Components: 79
 
 This file lists all third-party software components detected
 in this repository, along with their licenses and copyright
 notices as required by those licenses.
+
+------------------------------------------------------------
+
+WARNING: The following component(s) have no license information.
+These require manual review to determine licensing terms.
+
+  - automated-fuzzer (https://github.com/qarmin/Automated-Fuzzer)
 
 ------------------------------------------------------------
 
@@ -38,7 +45,7 @@ LICENSE SUMMARY
   BSD-3-Clause-LBNL: 1 component(s)
   BSD-4-Clause-UC: 1 component(s)
   BSD-Attribution-HPND-disclaimer: 1 component(s)
-  BSL-1.0: 1 component(s)
+  BSL-1.0: 2 component(s)
   CC-BY-1.0: 1 component(s)
   CC-BY-2.0: 1 component(s)
   CC-BY-2.5: 1 component(s)
@@ -91,7 +98,7 @@ LICENSE SUMMARY
   GPL-1.0-or-later AND CC-BY-4.0: 1 component(s)
   GPL-1.0-or-later AND GPL-2.0-or-later AND GPL-2.0-only: 1 component(s)
   GPL-1.0-or-later AND GPL-3.0-only AND MIT: 1 component(s)
-  GPL-2.0-only [COPYLEFT]: 4 component(s)
+  GPL-2.0-only [COPYLEFT]: 5 component(s)
   GPL-2.0-only AND GPL-3.0-only AND GPL-1.0-or-later AND GPL-1.0-or-later AND GPL-2.0-only: 1 component(s)
   GPL-2.0-or-later [COPYLEFT]: 2 component(s)
   GPL-3.0-linking-exception: 1 component(s)
@@ -133,7 +140,7 @@ LICENSE SUMMARY
   LPPL-1.3c: 1 component(s)
   Libpng: 1 component(s)
   Linux-syscall-note: 1 component(s)
-  MIT: 20 component(s)
+  MIT: 21 component(s)
   MIT AND Apache-2.0: 1 component(s)
   MIT AND GPL-2.0-only AND GPL-1.0-or-later AND MIT AND GPL-1.0-or-later AND MIT AND Boehm-GC AND GPL-1.0-or-later: 1 component(s)
   MIT AND GPL-3.0-only: 1 component(s)
@@ -200,6 +207,12 @@ COMPONENT ATTRIBUTIONS
     Copyright 2007; Google Inc.
   License: BSD-3-Clause
 
+  automated-fuzzer
+  Version: test
+  Source: https://github.com/qarmin/Automated-Fuzzer
+  PURL: pkg:github/qarmin/automated-fuzzer
+  License: UNKNOWN — requires manual review
+
   aview
   Version: 1.3.0rc1-6
   Source: https://snapshot.debian.org/archive/debian/20050312T000000Z/pool/main/a/aview/aview_1.3.0rc1-6_i386.deb
@@ -239,6 +252,14 @@ COMPONENT ATTRIBUTIONS
   Source: https://github.com/stolyarchuk/benchmark
   PURL: pkg:github/stolyarchuk/benchmark
   License: Apache-2.0
+
+  bombic
+  Version: 9cffa5d
+  Source: https://codeberg.org/osgames/bombic/archive/9cffa5d.zip
+  PURL: pkg:codeberg/osgames/bombic
+  Copyright:
+    Copyright 1989 Free Software Foundation Inc
+  License: GPL-2.0-only
 
   build-artifacts
   Version: nlohmann_json-v3.11.3
@@ -519,8 +540,12 @@ COMPONENT ATTRIBUTIONS
   Source: https://proxy.golang.org/github.com/abseil/googletest/@v/v1.14.1-0.20250212174407-c00fd25b71a1.zip
   PURL: pkg:golang/github.com/abseil/googletest
   Copyright:
+    Copyright 2008 Google Inc
+    Copyright 2017 Google Inc
     Copyright 2007; Google Inc.
     Copyright 2008; Google Inc.
+    Copyright 2009; Google Inc.
+    Copyright 2017 Google Inc.
     Copyright 2020; Google Inc.
   License: BSD-3-Clause
 
@@ -560,7 +585,7 @@ COMPONENT ATTRIBUTIONS
   PURL: pkg:golang/github.com/uscilab/cereal
   Copyright:
     Copyright (c) 2014; Randolph Voorhies; Shane Grant
-  License: BSD-3-Clause
+  License: BSD-3-Clause, BSL-1.0, MIT
 
   google-testmock
   Version: 1.14.0
@@ -603,6 +628,7 @@ COMPONENT ATTRIBUTIONS
     Copyright 2005 Google Inc
     Copyright 2008 ; Google Inc.
     Copyright 2014 gperftools Contributors
+    Copyright (c) 2000; Google Inc.
     Copyright (c) 2003; Google Inc.
     Copyright (c) 2004; Google Inc.
     Copyright (c) 2005; Google Inc.
@@ -627,7 +653,7 @@ COMPONENT ATTRIBUTIONS
   License: BSD-3-Clause
 
   gperftools
-  Version: a81b2eb
+  Version: ab49985
   Source: https://github.com/alk/gperftools
   PURL: pkg:github/alk/gperftools
   Copyright:
@@ -637,13 +663,19 @@ COMPONENT ATTRIBUTIONS
     Copyright (c) 2003; Google Inc.
     Copyright (c) 2004; Google Inc.
     Copyright (c) 2005; Google Inc.
+    Copyright (c) 2006; Google Inc.
     Copyright (c) 2007; Google Inc.
     Copyright (c) 2008-2009; Google Inc.
     Copyright (c) 2008; Google Inc.
+    Copyright (c) 2009; Google Inc.
+    Copyright (c) 2010 The Chromium Authors
+    Copyright (c) 2010 The Chromium Authors. All rights reserved.
     Copyright (c) 2011; Google Inc.
+    Copyright (c) 2013; Google Inc.
     Copyright (c) 2014; 2024; gperftools Contributors
     Copyright (c) 2014; gperftools Contributors
     Copyright (c) 2014; gperftools Contributors.
+    Copyright (c) 2016; gperftools Contributors
     Copyright (c) 2023; gperftools Contributors
     Copyright (c) 2024; gperftools Contributors
     Copyright 2008; Google Inc.
@@ -1072,6 +1104,8 @@ COMPONENT ATTRIBUTIONS
   Source: https://github.com/osyoyu/pf2
   PURL: pkg:github/osyoyu/pf2
   Copyright:
+    Copyright 2012-2016 Free Software Foundation Inc
+    Copyright 2016 Google Inc. All Rights Reserved
     Copyright 2023 Daisuke Aritomo
     Copyright (C) 2012-2016 Free Software Foundation; Inc.
     Copyright (c) 2023 Daisuke Aritomo
