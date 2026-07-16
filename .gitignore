@@ -62,3 +62,7 @@ simple_ops_keys/
 bootstrap_keys/
 simple_ops_server_*/
 bootstrap_server_*/
+
+# niobium-runtime artifact outputs (make runtime)
+build-runtime/
+dist/
