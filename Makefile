@@ -360,3 +360,9 @@ clean: ## Remove all build artifacts
 
 clean-all: clean ## Deep clean including vendor installations
 	-rm -rf $(VENDOR_LIB_DIR)
+
+# ==============================================================================
+# Capability fragments (one self-contained make fragment per distribution concern;
+# included last so they cannot displace the default goal).
+# ==============================================================================
+include make/runtime.mk
