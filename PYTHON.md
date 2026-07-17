@@ -6,13 +6,13 @@ This repo builds the two native Python extensions behind the `niobium_sdk` wheel
 - **`openfhe`** — the vendored **openfhe-python** crypto module, rebuilt against
   Niobium's instrumented OpenFHE.
 - **`niobium_session`** — pybind11 bindings for the `niobium::compiler()` record/replay
-  session API (`python/niobium_session.cpp`).
+  session API (`bindings/python/niobium_session.cpp`).
 
 Both are gated behind the CMake `WITH_PYTHON` option and land in
 `build/python/{openfhe,niobium_session}.*.so`.
 
 The Python build is kept out of the C++-focused root files: the CMake lives in
-[`python/CMakeLists.txt`](python/CMakeLists.txt) (`if(WITH_PYTHON) add_subdirectory(python)`
+[`bindings/python/CMakeLists.txt`](bindings/python/CMakeLists.txt) (`if(WITH_PYTHON) add_subdirectory(python)`
 from the root), and the dev/smoke make targets in [`make/python.mk`](make/python.mk)
 (`include`d by the root Makefile, sharing its variable namespace).
 
@@ -59,7 +59,7 @@ version you want in the build environment; it's aligned to upstream, which build
 
 ## Session bindings (`niobium_session`)
 
-`python/niobium_session.cpp` binds the `niobium::compiler()` API. Bound surface:
+`bindings/python/niobium_session.cpp` binds the `niobium::compiler()` API. Bound surface:
 
 ```
 init  set_program_info  set_build_info  cache_parameters  is_cache_valid
@@ -75,12 +75,12 @@ Conventions:
 - **Runtime coupling (important):** the module must **co-load `libnbfhetch`** — probe
   globals (`g_replay_mode`, the `NB_WEAK` symbols in `src/auto_facade.cpp`) are defined
   there, not in OpenFHE, and `openfhe.so`'s inlined probes reference them. The tests load
-  it `RTLD_GLOBAL` (via `python/tests/_nbcommon.py`, path from `NB_FHETCH_LIB`) *before*
+  it `RTLD_GLOBAL` (via `bindings/python/tests/_nbcommon.py`, path from `NB_FHETCH_LIB`) *before*
   `import openfhe`; the downstream wheel does it in its package `__init__`.
 
 ### Adding or updating a bound endpoint
 
-Add an `m.def("name", …)` in `python/niobium_session.cpp`. Endpoints templated on
+Add an `m.def("name", …)` in `bindings/python/niobium_session.cpp`. Endpoints templated on
 OpenFHE types are instantiated for `DCRTPoly` (see `capture_crypto_context`, `tag_input`,
 `tag_keys`, `probe`, `result`). Rebuild + smoke-test:
 
@@ -132,5 +132,5 @@ make test-session-api-python-release           PYTHON=$PY   # TEMP session-endpo
 The test targets export what the scripts need — `NB_FHETCH_LIB` (for the `_nbcommon`
 RTLD_GLOBAL preload), `NBCC_FHETCH_SIM`, `PYTHONPATH` (`build/python`), and
 `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` (the OpenFHE dylibs) — so the scripts run as bare
-commands. Test scenarios live in `python/tests/<scenario>/{client,server,decrypt}.py`
-with the shared bootstrap `python/tests/_nbcommon.py`.
+commands. Test scenarios live in `bindings/python/tests/<scenario>/{client,server,decrypt}.py`
+with the shared bootstrap `bindings/python/tests/_nbcommon.py`.

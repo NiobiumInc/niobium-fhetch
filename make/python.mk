@@ -4,7 +4,7 @@
 # OPENFHE_INSTALL_DIR, FHETCH_INSTALL_DIR, CMAKE_JSON_INCLUDE_DIR_FLAG,
 # OPENFHE_BUILD_DEP_RELEASE, and the set-build-config macro all come from there.
 #
-# The native build lives in python/CMakeLists.txt (add_subdirectory under
+# The native build lives in bindings/python/CMakeLists.txt (add_subdirectory under
 # WITH_PYTHON); these targets just drive config/build + the roundtrip/smoke loop.
 # `make help` greps $(MAKEFILE_LIST), so these targets still list.
 
@@ -73,10 +73,10 @@ define roundtrip-simple-op-python
 	@echo ""
 	@echo "=== Roundtrip $(1) (python) ==="
 	@rm -rf simple_ops_keys simple_ops_server_workload_*
-	@$(PY_EXE) python/tests/simple_ops/client.py simple_ops_keys $(2) $(3) 2>&1 | tail -1
-	@$(PY_EXE) python/tests/simple_ops/server.py simple_ops_keys $(1) --no-ring-dim-check 2>&1 | grep -E "Complete:|ERROR" | head -3 || true
+	@$(PY_EXE) bindings/python/tests/simple_ops/client.py simple_ops_keys $(2) $(3) 2>&1 | tail -1
+	@$(PY_EXE) bindings/python/tests/simple_ops/server.py simple_ops_keys $(1) --no-ring-dim-check 2>&1 | grep -E "Complete:|ERROR" | head -3 || true
 	@echo "  -- primary decrypt --"
-	@$(PY_EXE) python/tests/simple_ops/decrypt.py simple_ops_keys $(1) ct_result.bin 2>&1 | grep -E "PASS|FAIL"
+	@$(PY_EXE) bindings/python/tests/simple_ops/decrypt.py simple_ops_keys $(1) ct_result.bin 2>&1 | grep -E "PASS|FAIL"
 	@echo "  -- fhetch_driver (secondary) --"
 	@WORKLOAD_DIR=$$(ls -d simple_ops_server_workload_simple_ops_op_$(1) 2>/dev/null || true); \
 	 if [ -z "$$WORKLOAD_DIR" ]; then echo "  [SKIP] no workload dir"; exit 0; fi; \
@@ -87,7 +87,7 @@ define roundtrip-simple-op-python
 	     --output-ct result:simple_ops_keys/ct_result_secondary.bin 2>&1 \
 	     | grep -E "replayed:|Complete:|wrote|ERROR" | head -5 || true
 	@echo "  -- secondary decrypt --"
-	@$(PY_EXE) python/tests/simple_ops/decrypt.py simple_ops_keys $(1) ct_result_secondary.bin 2>&1 | grep -E "PASS|FAIL"
+	@$(PY_EXE) bindings/python/tests/simple_ops/decrypt.py simple_ops_keys $(1) ct_result_secondary.bin 2>&1 | grep -E "PASS|FAIL"
 endef
 
 test-roundtrip-simple-ops-python-release: build-python-release ## Full python roundtrip for all simple_ops (primary + secondary decrypt)
@@ -110,11 +110,11 @@ test-roundtrip-plaintext-add-python-release: build-python-release ## Full python
 	$(call set-build-config,Release,build)
 	@rm -rf plaintext_add_keys plaintext_add_server_workload_*
 	@echo "=== Plaintext-Add client (python) ==="
-	$(PY_EXE) python/tests/plaintext_add/client.py plaintext_add_keys
+	$(PY_EXE) bindings/python/tests/plaintext_add/client.py plaintext_add_keys
 	@echo "=== Plaintext-Add server (python) ==="
-	$(PY_EXE) python/tests/plaintext_add/server.py plaintext_add_keys --no-ring-dim-check
+	$(PY_EXE) bindings/python/tests/plaintext_add/server.py plaintext_add_keys --no-ring-dim-check
 	@echo "=== Plaintext-Add primary decrypt ==="
-	$(PY_EXE) python/tests/plaintext_add/decrypt.py plaintext_add_keys ct_result.bin
+	$(PY_EXE) bindings/python/tests/plaintext_add/decrypt.py plaintext_add_keys ct_result.bin
 	@echo "=== Plaintext-Add fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d plaintext_add_server_workload_* 2>/dev/null); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
@@ -123,17 +123,17 @@ test-roundtrip-plaintext-add-python-release: build-python-release ## Full python
 	     --cc plaintext_add_keys/cc.bin \
 	     --output-ct output_cipher:plaintext_add_keys/ct_result_secondary.bin
 	@echo "=== Plaintext-Add secondary decrypt ==="
-	$(PY_EXE) python/tests/plaintext_add/decrypt.py plaintext_add_keys ct_result_secondary.bin
+	$(PY_EXE) bindings/python/tests/plaintext_add/decrypt.py plaintext_add_keys ct_result_secondary.bin
 
 test-roundtrip-bootstrap-python-release: build-python-release ## Full python roundtrip for bootstrap (primary + secondary decrypt)
 	$(call set-build-config,Release,build)
 	@rm -rf bootstrap_keys bootstrap_server_workload_*
 	@echo "=== Bootstrap client (python) ==="
-	$(PY_EXE) python/tests/bootstrap/client.py bootstrap_keys
+	$(PY_EXE) bindings/python/tests/bootstrap/client.py bootstrap_keys
 	@echo "=== Bootstrap server (python) ==="
-	$(PY_EXE) python/tests/bootstrap/server.py bootstrap_keys --no-ring-dim-check
+	$(PY_EXE) bindings/python/tests/bootstrap/server.py bootstrap_keys --no-ring-dim-check
 	@echo "=== Bootstrap primary decrypt ==="
-	$(PY_EXE) python/tests/bootstrap/decrypt.py bootstrap_keys ct_result.bin
+	$(PY_EXE) bindings/python/tests/bootstrap/decrypt.py bootstrap_keys ct_result.bin
 	@echo "=== Bootstrap fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d bootstrap_server_workload_* 2>/dev/null); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
@@ -142,7 +142,7 @@ test-roundtrip-bootstrap-python-release: build-python-release ## Full python rou
 	     --cc bootstrap_keys/cc.bin \
 	     --output-ct output_cipher:bootstrap_keys/ct_result_secondary.bin
 	@echo "=== Bootstrap secondary decrypt ==="
-	$(PY_EXE) python/tests/bootstrap/decrypt.py bootstrap_keys ct_result_secondary.bin
+	$(PY_EXE) bindings/python/tests/bootstrap/decrypt.py bootstrap_keys ct_result_secondary.bin
 
 test-roundtrip-python-release: test-roundtrip-simple-ops-python-release test-roundtrip-plaintext-add-python-release test-roundtrip-bootstrap-python-release ## Full python roundtrip sweep: simple_ops + plaintext-add + bootstrap
 
@@ -152,4 +152,4 @@ test-roundtrip-python-release: test-roundtrip-simple-ops-python-release test-rou
 test-session-api-python-release: build-python-release ## TEMP: session-endpoint smoke (pause/resume, is_running, get_program_directory)
 	$(call set-build-config,Release,build)
 	@rm -rf session_api_smoke_workload_*
-	$(PY_EXE) python/tests/session_api_smoke.py
+	$(PY_EXE) bindings/python/tests/session_api_smoke.py

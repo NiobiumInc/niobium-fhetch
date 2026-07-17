@@ -172,12 +172,12 @@ endif()
 # Python bindings (optional)
 # ==============================================================================
 # The vendored openfhe-python crypto module + the niobium::compiler() session
-# module. Self-contained under python/ (both land in ${CMAKE_BINARY_DIR}/python).
+# module. Self-contained under bindings/python/ (both land in ${CMAKE_BINARY_DIR}/python).
 # The niobium-client wheel build flips WITH_PYTHON the same way; here it backs the
-# `*-python-release` dev/smoke make targets. See python/CMakeLists.txt.
+# `*-python-release` dev/smoke make targets. See bindings/python/CMakeLists.txt.
 
 if(WITH_PYTHON)
-    add_subdirectory(python)
+    add_subdirectory(bindings/python)
 endif()
 
 # ==============================================================================

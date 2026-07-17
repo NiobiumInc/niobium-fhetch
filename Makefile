@@ -343,7 +343,7 @@ test-release: \
     test-roundtrip-plaintext-add-release  ## Run all currently-passing Release tests
 
 # Python bindings dev/smoke targets (config/build + roundtrip tests) live in
-# their own makefile, mirroring python/CMakeLists.txt. Shares this file's
+# their own makefile, mirroring bindings/python/CMakeLists.txt. Shares this file's
 # variable namespace (set-build-config, BUILD_DIR, OPENFHE_* …).
 include make/python.mk
 

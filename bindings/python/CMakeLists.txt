@@ -6,14 +6,14 @@
 #                       site-packages install that don't compose under add_subdirectory)
 #   * niobium_session — the niobium::compiler() session bindings (our source)
 #
-# Component-only: add_subdirectory(python) from the top-level CMakeLists under
+# Component-only: add_subdirectory(bindings/python) from the top-level CMakeLists under
 # WITH_PYTHON. Unlike a standalone build, this needs the niobium_fhetch target
 # (niobium_session links it) and the OPENFHE_* vars, all defined by the parent.
 # Both modules land in ${CMAKE_BINARY_DIR}/python — the location the niobium-client
 # wheel build (which flips WITH_PYTHON the same way) picks them up from.
 
-# The fhetch source root (parent of python/): openfhe-python is vendored there.
-get_filename_component(NB_FHETCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
+# The fhetch source root (two levels up from bindings/python/): openfhe-python is vendored there.
+get_filename_component(NB_FHETCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
