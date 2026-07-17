@@ -12,9 +12,13 @@ Both are gated behind the CMake `WITH_PYTHON` option and land in
 `build/python/{openfhe,niobium_session}.*.so`.
 
 The Python build is kept out of the C++-focused root files: the CMake lives in
-[`bindings/python/CMakeLists.txt`](bindings/python/CMakeLists.txt) (`if(WITH_PYTHON) add_subdirectory(python)`
-from the root), and the dev/smoke make targets in [`make/python.mk`](make/python.mk)
-(`include`d by the root Makefile, sharing its variable namespace).
+[`CMakeLists.txt`](CMakeLists.txt) here (`if(WITH_PYTHON) add_subdirectory(bindings/python)`
+from the root), and the dev/smoke make targets in [`../../make/python.mk`](../../make/python.mk)
+(`include`d by the root Makefile, sharing its variable namespace). The recipe is **dual-mode**:
+it builds the same sources either from source (the co-development path, where the parent
+provides OpenFHE + `libnbfhetch`) or against a prebuilt `niobium-runtime` distribution
+(`-DNIOBIUM_RUNTIME_PREFIX=<extracted runtime>`) — which is how the downstream wheel builds a
+release without recompiling OpenFHE.
 
 ## openfhe-python: vendoring, pinning, patching
 
@@ -109,6 +113,13 @@ make config-python-release build-python-release PYTHON=$PY
 # Against a pre-installed OpenFHE (e.g. the parent client's vendor/lib/openfhe):
 make build-python-release PYTHON=$PY \
      EXTERNAL_OPENFHE=1 OPENFHE_INSTALL_DIR=/abs/path/to/openfhe
+
+# Runtime mode: build against a prebuilt niobium-runtime distribution, no OpenFHE compile.
+# (This is a standalone cmake invocation, not a make target — the downstream wheel uses it.)
+cmake -S bindings/python -B build/python-rt -DCMAKE_BUILD_TYPE=Release \
+      -DNIOBIUM_RUNTIME_PREFIX=/abs/path/to/niobium-runtime \
+      -Dpybind11_DIR=$($PY -m pybind11 --cmakedir) -DPython_EXECUTABLE=$PY
+cmake --build build/python-rt
 ```
 
 `config-python-release` sets `WITH_PYTHON=ON` (and `NIOBIUM_FHETCH_WITH_TESTS=ON`, so
