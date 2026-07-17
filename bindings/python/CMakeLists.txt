@@ -6,11 +6,54 @@
 #                       site-packages install that don't compose under add_subdirectory)
 #   * niobium_session — the niobium::compiler() session bindings (our source)
 #
-# Component-only: add_subdirectory(bindings/python) from the top-level CMakeLists under
-# WITH_PYTHON. Unlike a standalone build, this needs the niobium_fhetch target
-# (niobium_session links it) and the OPENFHE_* vars, all defined by the parent.
-# Both modules land in ${CMAKE_BINARY_DIR}/python — the location the niobium-client
-# wheel build (which flips WITH_PYTHON the same way) picks them up from.
+# Dual-mode:
+#   * Component (add_subdirectory(bindings/python) from the top-level CMakeLists under
+#     WITH_PYTHON): the from-source co-dev build. The parent defines the niobium_fhetch
+#     target + the OPENFHE_* vars, and OpenFHE is built from the vendored fork.
+#   * Standalone / runtime (cmake -S bindings/python -DNIOBIUM_RUNTIME_PREFIX=<extracted
+#     niobium-runtime>): builds the SAME sources against the prebuilt runtime — no OpenFHE
+#     compile. This is the path the niobium-client wheel drives for a release build.
+# Both land the two modules in ${CMAKE_BINARY_DIR}/python — where the wheel picks them up.
+cmake_minimum_required(VERSION 3.16)
+
+# A standalone invocation needs its own project(); under add_subdirectory the parent set it.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(niobium_fhetch_python CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
+
+# Runtime mode is selected by NIOBIUM_RUNTIME_PREFIX (-D or env), so it works whether the
+# recipe is invoked standalone or added by the client wheel via add_subdirectory. Without
+# it, component/from-source mode: the parent defines niobium_fhetch + the OPENFHE_* vars.
+if(NOT NIOBIUM_RUNTIME_PREFIX)
+    set(NIOBIUM_RUNTIME_PREFIX "$ENV{NIOBIUM_RUNTIME_PREFIX}")
+endif()
+if(NIOBIUM_RUNTIME_PREFIX)
+    # --- Runtime mode: consume a prebuilt niobium-runtime prefix (no OpenFHE compile) ---
+    set(NB_PY_RUNTIME_MODE ON)
+    if(NOT EXISTS "${NIOBIUM_RUNTIME_PREFIX}/lib/cmake/NiobiumFhetch")
+        message(FATAL_ERROR
+            "NIOBIUM_RUNTIME_PREFIX does not point at an extracted niobium-runtime prefix")
+    endif()
+    set(RT "${NIOBIUM_RUNTIME_PREFIX}")
+    list(APPEND CMAKE_PREFIX_PATH "${RT}")
+    find_package(NiobiumFhetch REQUIRED)   # imports Niobium::niobium_fhetch + OPENFHE* targets
+    set(NB_OPENFHE_DIR     "${RT}/lib/OpenFHE")
+    set(NB_FHETCH_TARGET   Niobium::niobium_fhetch)
+    set(NB_OPENFHE_LIBPATH "${RT}/lib")
+    # The imported runtime target exposes the OpenFHE includes BUILD_INTERFACE-only, so
+    # niobium_session wires them (and the OPENFHE libs) explicitly in this mode (below).
+    set(NB_OPENFHE_INC
+        ${RT}/include/openfhe ${RT}/include/openfhe/core
+        ${RT}/include/openfhe/pke ${RT}/include/openfhe/binfhe)
+else()
+    # --- Component mode: from-source co-dev build; the parent provides the deps ---
+    set(NB_PY_RUNTIME_MODE OFF)
+    set(NB_OPENFHE_DIR     "${OPENFHE_INSTALL_DIR}/lib/OpenFHE")
+    set(NB_FHETCH_TARGET   niobium_fhetch)
+    set(NB_OPENFHE_LIBPATH "${OPENFHE_LIBRARY_PATH}")
+endif()
 
 # The fhetch source root (two levels up from bindings/python/): openfhe-python is vendored there.
 get_filename_component(NB_FHETCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
@@ -59,7 +102,7 @@ ExternalProject_Add(openfhe_python
         # ops (inputs replay as zero). WITH_CPROBES in the OpenFHE build is
         # exactly `add_definitions(-DOPENFHE_CPROBES)`.
         -DCMAKE_CXX_FLAGS=-DOPENFHE_CPROBES
-        -DOpenFHE_DIR=${OPENFHE_INSTALL_DIR}/lib/OpenFHE
+        -DOpenFHE_DIR=${NB_OPENFHE_DIR}
         -DOPENFHE_REQUIRED_VERSION=1.4.2
         -Dpybind11_DIR=${pybind11_DIR}
         -DPython_EXECUTABLE=${Python_EXECUTABLE}
@@ -70,16 +113,22 @@ ExternalProject_Add(openfhe_python
 )
 
 # --- Session module: niobium::compiler() bindings (our source) ---
-# Links niobium_fhetch, which PUBLIC-propagates the OpenFHE includes/libs and
-# the OPENFHE_CPROBES define, so the headers compile identically to the library.
+# Component mode: niobium_fhetch PUBLIC-propagates the OpenFHE includes/libs and the
+# OPENFHE_CPROBES define, so the headers compile identically to the library. Runtime
+# mode: the imported target propagates less, so wire OpenFHE explicitly (see above).
 pybind11_add_module(niobium_session niobium_session.cpp)
-target_link_libraries(niobium_session PRIVATE niobium_fhetch)
+target_link_libraries(niobium_session PRIVATE ${NB_FHETCH_TARGET})
+if(NB_PY_RUNTIME_MODE)
+    target_include_directories(niobium_session PRIVATE ${NB_OPENFHE_INC})
+    target_link_directories(niobium_session PRIVATE ${RT}/lib)
+    target_link_libraries(niobium_session PRIVATE OPENFHEpke OPENFHEbinfhe OPENFHEcore)
+endif()
 set_target_properties(niobium_session PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${NB_PY_OUTDIR}")
 if(APPLE)
     set_target_properties(niobium_session PROPERTIES
-        BUILD_RPATH "@loader_path;${OPENFHE_LIBRARY_PATH}")
+        BUILD_RPATH "@loader_path;${NB_OPENFHE_LIBPATH}")
 else()
     set_target_properties(niobium_session PROPERTIES
-        BUILD_RPATH "$ORIGIN;${OPENFHE_LIBRARY_PATH}")
+        BUILD_RPATH "$ORIGIN;${NB_OPENFHE_LIBPATH}")
 endif()
