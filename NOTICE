@@ -2,7 +2,7 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 ============================================================
 
 Project: niobium-fhetch
-Generated: 2026-07-16
+Generated: 2026-07-17
 Tool: SCANOSS (snippet detection with License dataset)
 Components: 79
 
@@ -815,10 +815,13 @@ COMPONENT ATTRIBUTIONS
     Copyright 1993 The Regents of the University of California.
     Copyright 1995 97 Mark Olesen  lt;olesen@me.QueensU.CA gt
     Copyright 1995 ;97 Mark Olesen  lt;olesen@me.QueensU.CA gt;
+    Copyright 1995-1998 Eric Young  eay@cryptsoft.com)
     Copyright 1995-2022 Jean-loup Gailly and Mark Adler
+    Copyright 1996-2010 the NASM Authors - All rights reserved
     Copyright 1996-2010 the NASM Authors - All rights reserved.
     Copyright 1998 Todd C. Miller  lt;Todd.Miller@courtesan.com gt;
     Copyright 1998-2011 The OpenSSL Project.  All rights reserved.
+    Copyright 1998-2011 The OpenSSL Project. All rights reserved
     Copyright 1999-2000 Ross Bencina and Phil Burk
     Copyright 2000 Dug Song  lt;dugsong@monkey.org gt;
     Copyright 2000-2007 Niels Provos  lt;provos@citi.umich.edu gt;
@@ -844,6 +847,7 @@ COMPONENT ATTRIBUTIONS
     Copyright 2009-2015 by the contributors listed in CREDITS.TXT
     Copyright 2009-2019 by the contributors listed in CREDITS.TXT
     Copyright 2009-2023 D. R. Commander.  All Rights Reserved. lt;br gt;
+    Copyright 2009-2023 D. R. Commander. All Rights Reserved. lt;br gt
     Copyright 2009-2024 D. R. Commander.  All Rights Reserved. lt;br gt;
     Copyright 2010 ; The WebM Project authors. All rights reserved.
     Copyright 2010 The Android Open Source Project
@@ -858,6 +862,7 @@ COMPONENT ATTRIBUTIONS
     Copyright 2015-2020 the fiat-crypto authors (see
     Copyright 2015-2020 the fiat-crypto authors (see the AUTHORS file)
     Copyright 2016 ; Alliance for Open Media. All rights reserved.
+    Copyright 2016 Alliance for Open Media. All rights reserved
     Copyright 2016 Ismael Jimenez Martinez. All rights reserved
     Copyright 2017 ; Mozilla
     Copyright 2017 ; The Android Open Source Project
