@@ -3,7 +3,8 @@
 # niobium-runtime is the shared, language-neutral C++ core: instrumented OpenFHE +
 # libnbfhetch + fhetch_sim + headers + CMake config + a manifest. It is built once per
 # platform and published as a versioned binary artifact that downstream language
-# channels (e.g. niobium-sdk-python) consume instead of building OpenFHE from source.
+# channels (the Python wheel today, Node later) consume instead of building OpenFHE
+# from source.
 #
 # Included by the root Makefile; shares its variable namespace (VENDOR_DIR,
 # VENDOR_LIB_DIR, OPENFHE_DIR, OPENFHE_INSTALL_DIR, FHETCH_INSTALL_DIR, NUM_CPUS,
