@@ -5,7 +5,7 @@ name: niobium-runtime
 # default branch. Every run builds + acceptance-tests the runtime on each platform and
 # uploads the tarball as a (short-lived) run artifact for inspection. `publish: true`,
 # run from a vX.Y.Z tag ref, additionally attaches the tarballs + checksums to that tag's
-# GitHub Release. Nothing publishes on push/tag automatically (see DISTRIBUTION_PLAN §8).
+# GitHub Release. Nothing publishes on push/tag automatically.
 on:
   workflow_dispatch:
     inputs:
