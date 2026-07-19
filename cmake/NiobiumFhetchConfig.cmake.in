@@ -1,0 +1,21 @@
+@PACKAGE_INIT@
+
+# niobium_fhetch has a PUBLIC dependency on OpenFHE (it links the instrumented
+# fork and its headers appear in the API), so find it for consumers here — a
+# consumer should get the whole stack from find_package(NiobiumFhetch) alone.
+include(CMakeFindDependencyMacro)
+find_dependency(OpenFHE)
+
+include("${CMAKE_CURRENT_LIST_DIR}/NiobiumFhetchTargets.cmake")
+
+# The exported target links OpenFHE by name (OPENFHEcore/pke/binfhe); with OpenFHE
+# found above those resolve to its imported targets, which carry the lib locations
+# but NOT the include dirs. Attach the OpenFHE headers so a consumer of
+# Niobium::niobium_fhetch can #include "openfhe.h" without wiring OpenFHE itself.
+if(TARGET Niobium::niobium_fhetch AND OpenFHE_INCLUDE)
+  set_property(TARGET Niobium::niobium_fhetch APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    "${OpenFHE_INCLUDE}"
+    "${OpenFHE_INCLUDE}/core"
+    "${OpenFHE_INCLUDE}/pke"
+    "${OpenFHE_INCLUDE}/binfhe")
+endif()
