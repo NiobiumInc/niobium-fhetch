@@ -29,7 +29,7 @@ RUNTIME_BUILD    := $(CURDIR)/build-runtime
 RUNTIME_STAGE    := $(RUNTIME_BUILD)/$(RUNTIME_ID)
 RUNTIME_TARBALL  := $(CURDIR)/dist/$(RUNTIME_ID).tar.gz
 RUNTIME_TESTS    := $(RUNTIME_BUILD)/tests
-# Template assets for this fragment: manifest.json.in + NiobiumFhetchConfig.cmake.
+# Template assets for this fragment: manifest.json.in.
 RUNTIME_TEMPLATES := $(CURDIR)/make/runtime
 
 RUNTIME_OPENFHE_VERSION := $(shell grep -oE 'OPENFHE_VERSION_(MAJOR|MINOR|PATCH) [0-9]+' $(OPENFHE_DIR)/CMakeLists.txt | grep -oE '[0-9]+' | paste -sd. -)
@@ -80,12 +80,11 @@ assemble-runtime: ## Stage the (relocatable) niobium-runtime prefix
 	cp -a $(OPENFHE_INSTALL_DIR)/lib/libOPENFHE*.$(RUNTIME_LIB_EXT)*  $(RUNTIME_STAGE)/lib/
 	cp -a $(FHETCH_INSTALL_DIR)/lib/libnbfhetch*.$(RUNTIME_LIB_EXT)*  $(RUNTIME_STAGE)/lib/
 	cp -a $(OPENFHE_INSTALL_DIR)/lib/OpenFHE                $(RUNTIME_STAGE)/lib/
+	# fhetch's lib/cmake carries the install-generated NiobiumFhetchConfig + Targets.
 	cp -a $(FHETCH_INSTALL_DIR)/lib/cmake                   $(RUNTIME_STAGE)/lib/
 	cp    $(FHETCH_INSTALL_DIR)/bin/fhetch_sim              $(RUNTIME_STAGE)/bin/
 	cp -a $(OPENFHE_INSTALL_DIR)/include/openfhe            $(RUNTIME_STAGE)/include/
 	cp -a $(FHETCH_INSTALL_DIR)/include/niobium             $(RUNTIME_STAGE)/include/
-	cp $(RUNTIME_TEMPLATES)/NiobiumFhetchConfig.cmake \
-		$(RUNTIME_STAGE)/lib/cmake/NiobiumFhetch/NiobiumFhetchConfig.cmake
 	# Relocatability: rewrite OpenFHEConfig's absolute OpenFHE_INCLUDE/LIBDIR relative to
 	# the config file, and give bin/fhetch_sim a self-rpath to the bundled libs.
 	sed -i.bak \
