@@ -243,11 +243,27 @@ static std::string normalize_opt_level(const std::string& v) {
 }
 
 void Compiler::init(int& argc, char** argv) {
-    // Parse and consume Niobium-specific flags from argv.
-    // Recognized flags: --hollow, --multithreaded, --target=<value>,
-    // --opt-level=<O0..O3>, -v, --no-prime-check, --no-ring-dim-check, --montgomery, --bit_reversal,
-    // --niobium_hw (= montgomery + bit_reversal, the Niobium hardware
-    // convention; matches the compiler's flag of the same name).
+    // Parse and consume Niobium-specific flags from argv; unrecognized
+    // arguments are left in place for the host program.
+    //
+    // Public flags (documented in the niobium-client README):
+    //   --target=<t>          replay target: "local" (default, in-process
+    //                         FHETCH sim); any other value hands replay off
+    //                         to nbcc_fhetch_replay
+    //   --hollow              hollow recording (trace without real math)
+    //   --opt-level=<O0..O3>  optimization level, forwarded on replay handoff
+    //   -v                    verbose diagnostics
+    //
+    // Internal/testing flags (not part of the public interface):
+    //   --multithreaded       multithreaded recording mode
+    //   --montgomery          record polys in Montgomery data format
+    //   --bit_reversal        record polys in bit-reversed order
+    //   --niobium_hw          = --montgomery + --bit_reversal (the Niobium
+    //                         hardware convention; matches the compiler's
+    //                         flag of the same name)
+    //   --no-prime-check      skip the modulus-primality check
+    //   --no-ring-dim-check   skip the minimum-ring-dimension check
+    //                         (needed for toy ring dimensions in tests)
     int write_pos = 1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];

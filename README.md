@@ -217,6 +217,19 @@ This builds OpenFHE (vendored submodule), then the `libnbfhetch` library and the
 - CMake 3.16+
 - OpenFHE (Niobium-instrumented branch, vendored under `vendor/openfhe` — required because the compiler uses `cereal` serialization bundled with OpenFHE)
 
+## Releases
+
+Building from source (above) is one option. Tagged releases also publish a **prebuilt binary
+distribution**, `niobium-runtime`, on the GitHub Releases page, so downstream language
+channels — the Python wheel today, Node later — depend on a release instead of compiling
+OpenFHE from source. Each release is a versioned, relocatable prefix (headers, libraries,
+`fhetch_sim`, and CMake config) that a build consumes via `find_package(NiobiumFhetch)`.
+
+```bash
+make runtime        # build a distribution locally, into dist/
+make test-runtime   # external-consumer acceptance (records + replays)
+```
+
 ## Usage
 
 A host integration (e.g. `niobium-client`) typically drives the session as:

@@ -69,3 +69,7 @@ session_api_smoke_workload_*/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# niobium-runtime artifact outputs (make runtime)
+build-runtime/
+dist/

@@ -185,6 +185,7 @@ endif()
 # ==============================================================================
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 install(TARGETS niobium_fhetch
     EXPORT NiobiumFhetchTargets
@@ -201,6 +202,25 @@ install(DIRECTORY include/niobium
 install(EXPORT NiobiumFhetchTargets
     FILE        NiobiumFhetchTargets.cmake
     NAMESPACE   Niobium::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/NiobiumFhetch
+)
+
+# Package config + version so external consumers can `find_package(NiobiumFhetch)`
+# (the export above installs only the Targets file, which find_package can't locate
+# on its own).
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/NiobiumFhetchConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/NiobiumFhetch
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfigVersion.cmake
+    VERSION       ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/NiobiumFhetch
 )
 

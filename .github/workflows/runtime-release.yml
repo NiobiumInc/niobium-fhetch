@@ -1,0 +1,104 @@
+name: niobium-runtime
+
+# Manual-only, matching the client's Wheels workflow. A workflow_dispatch workflow is
+# runnable (Actions tab "Run workflow" / `gh workflow run`) only once this file is on the
+# default branch. Every run builds + acceptance-tests the runtime on each platform and
+# uploads the tarball as a (short-lived) run artifact for inspection. `publish: true`,
+# run from a vX.Y.Z tag ref, additionally attaches the tarballs + checksums to that tag's
+# GitHub Release. Nothing publishes on push/tag automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Attach the built runtimes to the GitHub Release for the current tag ref"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: runtime (${{ matrix.id }})
+    runs-on: ${{ matrix.runner }}
+    # Linux builds run inside the manylinux_2_28 container for glibc portability; macOS
+    # builds run directly on the runner (empty container = none).
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: manylinux-x86_64
+            runner: ubuntu-latest
+            container: quay.io/pypa/manylinux_2_28_x86_64
+            ncpus: 4
+          - id: manylinux-aarch64
+            runner: ubuntu-24.04-arm      # native arm64 (GitHub-hosted)
+            container: quay.io/pypa/manylinux_2_28_aarch64
+            ncpus: 4
+          - id: macos-arm64
+            runner: macos-14              # Apple Silicon
+            container: ''
+            ncpus: 2                      # 3-core / 7 GB — cc1plus is memory-bound, cap -j
+    steps:
+      # OpenFHE + its third-party submodules are nested under vendor/; --recursive pulls
+      # them so OpenFHE's in-tree `git submodule` step resolves them.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Trust the workspace (the manylinux container runs as root)
+        if: matrix.container != ''
+        run: git config --global --add safe.directory '*'
+
+      # manylinux ships gcc-toolset + patchelf on PATH; add cmake (pip) for the build.
+      - name: Install cmake (manylinux)
+        if: matrix.container != ''
+        run: |
+          /opt/python/cp311-cp311/bin/pip install --quiet cmake
+          ln -sf /opt/python/cp311-cp311/bin/cmake /usr/local/bin/cmake
+          gcc --version | head -1; cmake --version | head -1; patchelf --version
+
+      - name: Build the runtime
+        run: make runtime NUM_CPUS=${{ matrix.ncpus }}
+
+      - name: Acceptance test (IR + crypto paths)
+        run: make test-runtime NUM_CPUS=${{ matrix.ncpus }}
+
+      - name: Upload the runtime tarball (run artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: niobium-runtime-${{ matrix.id }}
+          path: dist/niobium-runtime-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # Gated publish: only on an explicit dispatch with publish=true, from a vX.Y.Z tag ref.
+  release:
+    name: Attach GitHub Release
+    needs: build
+    if: ${{ inputs.publish && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create/attach the Release for the tag
+    steps:
+      - name: Download all runtime tarballs
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: niobium-runtime-*
+          merge-multiple: true
+      - name: Checksums
+        run: cd artifacts && sha256sum *.tar.gz | tee SHA256SUMS
+      - name: Attach tarballs + checksums to the tag's Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/SHA256SUMS

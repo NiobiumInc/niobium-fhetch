@@ -1,0 +1,11 @@
+{
+  "name": "niobium-runtime",
+  "version": "@RUNTIME_VERSION@",
+  "platform": "@RUNTIME_PLATFORM@",
+  "openfhe_version": "@RUNTIME_OPENFHE_VERSION@",
+  "openfhe_pin": "@RUNTIME_OPENFHE_PIN@",
+  "fhetch_pin": "@RUNTIME_FHETCH_PIN@",
+  "libnbfhetch_soversion": "1",
+  "build": { "MATHBACKEND": 4, "CPROBES": true, "NTL": false, "OPENMP": false, "NATIVEOPT": false },
+  "ir_abi": "fhetch-1"
+}
