@@ -5,3 +5,6 @@
 [submodule "vendor/json"]
 	path = vendor/json
 	url = https://github.com/nlohmann/json.git
+[submodule "vendor/openfhe-python"]
+	path = vendor/openfhe-python
+	url = https://github.com/openfheorg/openfhe-python.git

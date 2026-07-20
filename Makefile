@@ -342,6 +342,11 @@ test-release: \
     test-roundtrip-simple-ops-release \
     test-roundtrip-plaintext-add-release  ## Run all currently-passing Release tests
 
+# Python bindings dev/smoke targets (config/build + roundtrip tests) live in
+# their own makefile, mirroring bindings/python/CMakeLists.txt. Shares this file's
+# variable namespace (set-build-config, BUILD_DIR, OPENFHE_* …).
+include make/python.mk
+
 ##@ Installation
 
 install: ## Install the fhetch library (Debug)

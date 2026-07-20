@@ -31,6 +31,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -Wextra -Wunused-but-set-variable -Wno-un
 
 option(BUILD_SHARED_LIBS   "Build shared libraries instead of static ones" ON)
 option(WITH_FHETCH_SIM     "Build the standalone FHETCH simulator CLI (fhetch_sim). The simulator is always linked into the library because Compiler::replay() uses it." ON)
+option(WITH_PYTHON         "Build the Python bindings: the vendored openfhe-python crypto module + the niobium::compiler() session module. Requires pybind11 + Python dev headers (pass -Dpybind11_DIR and -DPython_EXECUTABLE)." OFF)
 
 # Link OpenFHE's *_static.a archives instead of the shared OPENFHE* libraries.
 # Default OFF preserves the historical shared link exactly. Turned ON by parents
@@ -165,6 +166,18 @@ if(WITH_FHETCH_SIM)
       set_target_properties(fhetch_sim PROPERTIES
           BUILD_RPATH "${OPENFHE_LIBRARY_PATH}")
     endif()
+endif()
+
+# ==============================================================================
+# Python bindings (optional)
+# ==============================================================================
+# The vendored openfhe-python crypto module + the niobium::compiler() session
+# module. Self-contained under bindings/python/ (both land in ${CMAKE_BINARY_DIR}/python).
+# The niobium-client wheel build flips WITH_PYTHON the same way; here it backs the
+# `*-python-release` dev/smoke make targets. See bindings/python/CMakeLists.txt.
+
+if(WITH_PYTHON)
+    add_subdirectory(bindings/python)
 endif()
 
 # ==============================================================================

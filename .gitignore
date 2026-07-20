@@ -60,8 +60,15 @@ vendor/lib-*/
 fhetch_driver_source_*/
 simple_ops_keys/
 bootstrap_keys/
+plaintext_add_keys/
 simple_ops_server_*/
 bootstrap_server_*/
+plaintext_add_server_*/
+session_api_smoke_workload_*/
+
+# Python bytecode
+__pycache__/
+*.pyc
 
 # niobium-runtime artifact outputs (make runtime)
 build-runtime/
