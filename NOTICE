@@ -2,9 +2,9 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 ============================================================
 
 Project: niobium-fhetch
-Generated: 2026-07-22
+Generated: 2026-07-23
 Tool: SCANOSS (snippet detection with License dataset)
-Components: 80
+Components: 82
 
 This file lists all third-party software components detected
 in this repository, along with their licenses and copyright
@@ -26,7 +26,7 @@ LICENSE SUMMARY
   AFL-2.1: 1 component(s)
   AFL-3.0 AND GPL-2.0-only AND AFL-2.1 AND GPL-2.0-or-later AND MIT AND GPL-1.0-or-later: 1 component(s)
   AGPL-3.0-only [COPYLEFT]: 1 component(s)
-  Apache-2.0: 17 component(s)
+  Apache-2.0: 18 component(s)
   Apache-2.0 AND Apache-2.0 AND OpenSSL: 1 component(s)
   Apache-2.0 WITH LLVM-exception: 3 component(s)
   Apache-2.0 WITH LLVM-exception AND NCSA: 2 component(s)
@@ -39,7 +39,7 @@ LICENSE SUMMARY
   BSD-2-Clause AND LGPL-2.1-only: 1 component(s)
   BSD-2-Clause-Darwin: 1 component(s)
   BSD-2-Clause-Patent: 1 component(s)
-  BSD-3-Clause: 33 component(s)
+  BSD-3-Clause: 34 component(s)
   BSD-3-Clause AND GPL-2.0-only AND BSD-3-Clause OR GPL-2.0-or-later AND GPL-1.0-or-later: 1 component(s)
   BSD-3-Clause AND ISC AND ISC AND MIT AND MIT: 1 component(s)
   BSD-3-Clause-LBNL: 1 component(s)
@@ -509,14 +509,25 @@ COMPONENT ATTRIBUTIONS
   Source: https://proxy.golang.org/github.com/abseil/googletest/@v/v1.14.1-0.20250212174407-c00fd25b71a1.zip
   PURL: pkg:golang/github.com/abseil/googletest
   Copyright:
+    Copyright 2005 Google Inc. All Rights Reserved
     Copyright 2008 Google Inc
     Copyright 2009 Google Inc. All Rights Reserved
+    Copyright 2015 Google Inc. All rights reserved
     Copyright 2017 Google Inc
+    Copyright 2018 Google LLC. All rights reserved
+    Copyright 2019 Google LLC. All Rights Reserved
+    Copyright 2020 Google Inc. All Rights Reserved
+    Copyright 2021 Google Inc. All Rights Reserved
+    Copyright 2005 Google Inc.
     Copyright 2006; Google Inc.
     Copyright 2007; Google Inc.
     Copyright 2009 Google Inc.
+    Copyright 2015 Google Inc.
+    Copyright 2018 Google LLC.
+    Copyright 2019 Google LLC.
     Copyright 2019; Google Inc.
-    Copyright 2020; Google Inc.
+    Copyright 2020 Google Inc.
+    Copyright 2021 Google Inc.
   License: BSD-3-Clause
 
   github.com/chyezh/cgosymbolizer
@@ -541,8 +552,27 @@ COMPONENT ATTRIBUTIONS
   PURL: pkg:golang/github.com/gperftools/gperftools
   Copyright:
     Copyright 2005 Google Inc
+    Copyright (c) 2004; Google Inc.
+    Copyright (c) 2006; Google Inc.
     Copyright (c) 2007; Google Inc.
     Copyright (c) 2008; Google Inc.
+    Copyright (c) 2009; Google Inc.
+    Copyright (c) 2010 The Chromium Authors
+    Copyright (c) 2010 The Chromium Authors. All rights reserved.
+    Copyright (c) 2011; Google Inc.
+    Copyright (c) 2013; Google Inc.
+    Copyright (c) 2014; 2024; gperftools Contributors
+    Copyright (c) 2016; gperftools Contributors
+    Copyright (c) 2024; gperftools Contributors
+    Copyright 2009 Google Inc. All Rights Reserved.
+  License: BSD-3-Clause
+
+  github.com/ianlancetaylor/cgosymbolizer
+  Version: v0.0.0-20240716002849-277379683ee5
+  Source: https://proxy.golang.org/github.com/ianlancetaylor/cgosymbolizer/@v/v0.0.0-20240716002849-277379683ee5.zip
+  PURL: pkg:golang/github.com/ianlancetaylor/cgosymbolizer
+  Copyright:
+    Copyright 2012-2024 Free Software Foundation Inc
   License: BSD-3-Clause
 
   github.com/ianlancetaylor/libbacktrace
@@ -618,6 +648,7 @@ COMPONENT ATTRIBUTIONS
   Copyright:
     Copyright 2005 Google Inc
     Copyright 2023 gperftools Contributors
+    Copyright (c) 2000; Google Inc.
     Copyright (c) 2003; Google Inc.
     Copyright (c) 2004; Google Inc.
     Copyright (c) 2006; Google Inc.
@@ -943,6 +974,15 @@ COMPONENT ATTRIBUTIONS
   Version: v0.1.0a14.post0
   Source: https://github.com/seoklab/nurikit
   PURL: pkg:github/seoklab/nurikit
+  Copyright:
+    Copyright 2017 Google Inc
+    Copyright 2007; Google Inc.
+  License: Apache-2.0
+
+  nurikit
+  Version: 0.1.0a14.post0
+  Source: https://pypi.org/project/nurikit
+  PURL: pkg:pypi/nurikit
   Copyright:
     Copyright 2017 Google Inc
     Copyright 2007; Google Inc.
@@ -9950,34 +9990,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 
---- BSD-3-Clause ---
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice,
-   this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its contributors
-   may be used to endorse or promote products derived from this software
-   without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
 --- BSD-3-Clause AND GPL-2.0-only AND BSD-3-Clause OR GPL-2.0-or-later AND GPL-1.0-or-later ---
 
 Redistribution and use in source and binary forms, with or without
@@ -10025,6 +10037,34 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+--- BSD-3-Clause ---
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 --- BSD-2-Clause ---
