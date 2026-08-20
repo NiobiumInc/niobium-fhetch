@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0.
 
 #include "niobium/compiler.h"
+#include "niobium/producer_version.h"
 #include "niobium/fhetch_api.h"
 #include "niobium/fhetch_sim/simulator.h"
 #include "compiler_internal.h"
@@ -1234,6 +1235,18 @@ void Compiler::write_replay_json() {
         {"name", impl_->program_name},
         {"version", impl_->program_version},
         {"description", impl_->program_description}
+    };
+
+    // ---- producer ----
+    // Who built this bundle. The compiler that consumes it uses
+    // client_version to decide whether it can still accept the bundle; see
+    // COMPATIBILITY.md.
+    //
+    // Note program_info.version above is the *user's application* version,
+    // set via set_program_info() -- unrelated to either version here.
+    replay["producer"] = {
+        {"client_version", niobium::client_version()},
+        {"fhetch_version", niobium::fhetch_version()}
     };
 
     // ---- crypto_context (matches compiler's schema) ----

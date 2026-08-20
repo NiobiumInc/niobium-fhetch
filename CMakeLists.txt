@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(NiobiumFhetch VERSION 1.0.0 LANGUAGES CXX)
+# VERSION is the single source of truth for this repo's version. make/runtime.mk
+# previously scraped the number back out of the project() line below with a
+# regex; both now read the same file.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" NIOBIUM_FHETCH_VERSION)
+string(STRIP "${NIOBIUM_FHETCH_VERSION}" NIOBIUM_FHETCH_VERSION)
+if(NOT NIOBIUM_FHETCH_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR
+    "VERSION must be a bare X.Y.Z semver, got '${NIOBIUM_FHETCH_VERSION}'.")
+endif()
+set_property(DIRECTORY APPEND PROPERTY
+  CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+
+project(NiobiumFhetch VERSION ${NIOBIUM_FHETCH_VERSION} LANGUAGES CXX)
+
+# Stamped into every bundle this library writes, so the consuming compiler can
+# tell what produced it. NIOBIUM_CLIENT_VERSION is left to the distribution
+# embedding this library -- it defaults to "unknown", which is correct for a
+# standalone build. See COMPATIBILITY.md.
+add_compile_definitions(NIOBIUM_FHETCH_VERSION="${NIOBIUM_FHETCH_VERSION}")
 
 # Use ccache if available
 find_program(CCACHE_PROGRAM ccache)
