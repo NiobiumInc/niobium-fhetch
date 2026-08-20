@@ -10,9 +10,11 @@
 # VENDOR_LIB_DIR, OPENFHE_DIR, OPENFHE_INSTALL_DIR, FHETCH_INSTALL_DIR, NUM_CPUS,
 # CURDIR, CMAKE_JSON_INCLUDE_DIR_FLAG, EXTERNAL_OPENFHE).
 
-# Version tracks the fhetch library (project(NiobiumFhetch VERSION ...)); the OpenFHE
-# version, pins, and interop tag live in the manifest, not the version number.
-RUNTIME_VERSION  := $(shell grep -oE 'NiobiumFhetch VERSION [0-9]+\.[0-9]+\.[0-9]+' $(CURDIR)/CMakeLists.txt | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+# Version tracks the fhetch library; the OpenFHE version, pins, and interop tag
+# live in the manifest, not the version number. Read straight from VERSION,
+# which CMake also reads -- this used to regex the project() line out of
+# CMakeLists.txt, which broke as soon as that line stopped being a literal.
+RUNTIME_VERSION  := $(shell cat $(CURDIR)/VERSION)
 RUNTIME_OS       := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 RUNTIME_ARCH     := $(shell uname -m)
 RUNTIME_ID       := niobium-runtime-$(RUNTIME_VERSION)-$(RUNTIME_OS)-$(RUNTIME_ARCH)
