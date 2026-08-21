@@ -19,10 +19,12 @@
 #include <utility>
 #include <nlohmann/json.hpp>
 
+#include <cerrno>
 #include <spawn.h>
 #include <string>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <vector>
 
 // `environ` is POSIX-required globally but not declared by <unistd.h>
@@ -1056,6 +1058,143 @@ static std::string env_or(const char* name, const char* fallback) {
     return (v != nullptr && *v != '\0') ? std::string(v) : std::string(fallback);
 }
 
+// ---------------------------------------------------------------------------
+// Resident driver (NBCC_FHETCH_SERVE=1)
+//
+// By default replay_project() spawns a driver per call and waits for it, so
+// every batch re-pays process setup and, on FPGA targets, the FHE
+// configuration. With NBCC_FHETCH_SERVE=1 the driver is spawned once with
+// NBCC_SERVE=1 in its environment and handed one project per call over a pipe,
+// so its resident engine keeps the PL session and FHE config across batches.
+// Pair it with NBCC_WARM_REPLAY=1 for the driver, or the driver still forks its
+// own replay per batch and only the process setup is recovered.
+//
+// Only stdout is piped. The driver's [TIMING] output goes to stderr, which
+// stays inherited so it lands where it always did. We read the pipe line by
+// line until the driver's SERVE-READY sentinel, and that read loop is also the
+// drain: the driver emits thousands of lines per batch and would block on a
+// full pipe if we deferred reading until after sending the request.
+namespace {
+
+struct ResidentDriver {
+    pid_t       pid      = -1;
+    int         req_fd   = -1;   // requests go in here
+    int         rsp_fd   = -1;   // the driver's stdout comes out here
+    std::string signature;       // exec+target+opt this child was started for
+    std::string inbuf;
+    bool        awaiting_initial = false;  // spawn args carried the first project
+    bool        disabled = false;          // a failure falls back permanently
+
+    ~ResidentDriver() { shutdown(); }
+
+    void shutdown() {
+        if (pid <= 0) return;
+        if (req_fd >= 0) {
+            static const char kQuit[] = "quit\n";
+            ssize_t ignored = ::write(req_fd, kQuit, sizeof(kQuit) - 1);
+            (void)ignored;
+            ::close(req_fd);
+            req_fd = -1;
+        }
+        if (rsp_fd >= 0) { ::close(rsp_fd); rsp_fd = -1; }
+        int status = 0;
+        (void)::waitpid(pid, &status, 0);
+        pid = -1;
+        inbuf.clear();
+    }
+
+    bool start(const std::string& exec, const std::vector<std::string>& args) {
+        int req[2] = {-1, -1};
+        int rsp[2] = {-1, -1};
+        if (::pipe(req) != 0) return false;
+        if (::pipe(rsp) != 0) { ::close(req[0]); ::close(req[1]); return false; }
+
+        posix_spawn_file_actions_t fa;
+        posix_spawn_file_actions_init(&fa);
+        posix_spawn_file_actions_adddup2(&fa, req[0], STDIN_FILENO);
+        posix_spawn_file_actions_adddup2(&fa, rsp[1], STDOUT_FILENO);
+        posix_spawn_file_actions_addclose(&fa, req[1]);
+        posix_spawn_file_actions_addclose(&fa, rsp[0]);
+
+        // Inherit the environment with NBCC_SERVE forced on, replacing any
+        // value already present so the child cannot be told otherwise.
+        std::vector<std::string> env_owned;
+        for (char** e = environ; e != nullptr && *e != nullptr; ++e) {
+            if (std::strncmp(*e, "NBCC_SERVE=", 11) == 0) continue;
+            env_owned.emplace_back(*e);
+        }
+        env_owned.emplace_back("NBCC_SERVE=1");
+        std::vector<char*> envp;
+        envp.reserve(env_owned.size() + 1);
+        for (auto& s : env_owned) envp.push_back(const_cast<char*>(s.c_str()));
+        envp.push_back(nullptr);
+
+        std::vector<char*> argv;
+        argv.reserve(args.size() + 1);
+        for (const auto& a : args) argv.push_back(const_cast<char*>(a.c_str()));
+        argv.push_back(nullptr);
+
+        const int err = ::posix_spawnp(&pid, exec.c_str(), &fa, nullptr,
+                                       argv.data(), envp.data());
+        posix_spawn_file_actions_destroy(&fa);
+        ::close(req[0]);
+        ::close(rsp[1]);
+        if (err != 0) {
+            ::close(req[1]);
+            ::close(rsp[0]);
+            pid = -1;
+            return false;
+        }
+        req_fd = req[1];
+        rsp_fd = rsp[0];
+        awaiting_initial = true;
+        return true;
+    }
+
+    // False on EOF or unrecoverable read error.
+    bool read_line(std::string& out) {
+        for (;;) {
+            const auto nl = inbuf.find('\n');
+            if (nl != std::string::npos) {
+                out.assign(inbuf, 0, nl);
+                inbuf.erase(0, nl + 1);
+                return true;
+            }
+            char buf[8192];
+            const ssize_t n = ::read(rsp_fd, buf, sizeof buf);
+            if (n > 0) { inbuf.append(buf, static_cast<size_t>(n)); continue; }
+            if (n < 0 && errno == EINTR) continue;
+            if (!inbuf.empty()) { out.swap(inbuf); inbuf.clear(); return true; }
+            return false;
+        }
+    }
+
+    // 0 when the batch completed, -1 when the driver ended instead.
+    int run_project(const std::filesystem::path& dir) {
+        if (awaiting_initial) {
+            awaiting_initial = false;   // the spawn argv already named it
+        } else {
+            const std::string req = "run " + dir.string() + "\n";
+            if (::write(req_fd, req.data(), req.size()) !=
+                static_cast<ssize_t>(req.size()))
+                return -1;
+        }
+        std::string line;
+        while (read_line(line)) {
+            std::cout << line << std::endl;   // relay, and drain the pipe
+            if (line.find("SERVE-READY") != std::string::npos) return 0;
+        }
+        return -1;
+    }
+};
+
+ResidentDriver& resident() {
+    static ResidentDriver d;
+    return d;
+}
+
+}  // namespace
+
 bool Compiler::replay_project(const std::string& target, const std::filesystem::path& dir,
                               const std::string& opt_level, bool niobium_hw) {
     // Build the worker command. "local" runs the bundled, open fhetch_sim (no
@@ -1086,22 +1225,70 @@ bool Compiler::replay_project(const std::string& target, const std::filesystem::
     for (const auto& a : args) std::cout << ' ' << a;
     std::cout << std::endl;
 
-    pid_t pid = 0;
-    int spawn_err = ::posix_spawnp(&pid, exec.c_str(), nullptr, nullptr,
-                                   argv.data(), environ);
     int rc = -1;
-    if (spawn_err == 0) {
-        int status = 0;
-        if (::waitpid(pid, &status, 0) == pid) {
-            if (WIFEXITED(status)) {
-                rc = WEXITSTATUS(status);
-            } else if (WIFSIGNALED(status)) {
-                rc = 128 + WTERMSIG(status);
+    bool served = false;
+
+    // Resident driver, opt-in, compiler-side targets only (the bundled
+    // fhetch_sim has no serve loop). Anything unexpected disables it for the
+    // rest of the run and falls back to spawning per call.
+    static const bool serve_enabled = [] {
+        const char* v = std::getenv("NBCC_FHETCH_SERVE");
+        return v != nullptr && v[0] == '1';
+    }();
+    if (serve_enabled && target != "local") {
+        auto& rd = resident();
+        // The child's argv fixes target/opt/hw for its lifetime; only the
+        // project varies per request. A caller changing those mid-run gets the
+        // spawn path rather than a silently wrong child.
+        const std::string sig = exec + '\x1f' + target + '\x1f' + opt_level +
+                                (niobium_hw ? "\x1fhw" : "");
+        if (!rd.disabled && rd.pid < 0) {
+            if (rd.start(exec, args)) {
+                rd.signature = sig;
+                std::cout << "[NIOBIUM] resident " << exec << " started (pid "
+                          << rd.pid << ", NBCC_SERVE=1)" << std::endl;
+            } else {
+                std::cerr << "[NIOBIUM] could not start a resident " << exec
+                          << "; falling back to spawn-per-call" << std::endl;
+                rd.disabled = true;
+            }
+        } else if (!rd.disabled && rd.signature != sig) {
+            std::cerr << "[NIOBIUM] resident " << exec << " was started for a"
+                         " different target/opt-level; falling back to"
+                         " spawn-per-call" << std::endl;
+            rd.shutdown();
+            rd.disabled = true;
+        }
+        if (!rd.disabled && rd.pid > 0) {
+            if (rd.run_project(dir) == 0) {
+                rc = 0;
+                served = true;
+            } else {
+                std::cerr << "[NIOBIUM] resident " << exec << " ended before"
+                             " completing the batch" << std::endl;
+                rd.shutdown();
+                rd.disabled = true;
             }
         }
-    } else {
-        std::cerr << "[NIOBIUM] posix_spawnp failed: errno=" << spawn_err
-                  << std::endl;
+    }
+
+    if (!served) {
+        pid_t pid = 0;
+        int spawn_err = ::posix_spawnp(&pid, exec.c_str(), nullptr, nullptr,
+                                       argv.data(), environ);
+        if (spawn_err == 0) {
+            int status = 0;
+            if (::waitpid(pid, &status, 0) == pid) {
+                if (WIFEXITED(status)) {
+                    rc = WEXITSTATUS(status);
+                } else if (WIFSIGNALED(status)) {
+                    rc = 128 + WTERMSIG(status);
+                }
+            }
+        } else {
+            std::cerr << "[NIOBIUM] posix_spawnp failed: errno=" << spawn_err
+                      << std::endl;
+        }
     }
     if (rc != 0) {
         std::cerr << "[NIOBIUM] " << exec << " failed (exit " << rc
