@@ -178,15 +178,29 @@ std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
 
     out.close();
 
-    if (!fhetch::write_fhetch_text(path, program)) {
+    // The two forms describe the same program, so both come from the one
+    // writer over the same instructions.
+    const auto binary_path = std::filesystem::path(path).replace_extension(".fhex");
+    const bool want_text = format_ != TraceFormat::Binary;
+    const bool want_binary = format_ != TraceFormat::Text;
+
+    if (want_text && !fhetch::write_fhetch_text(path, program)) {
         std::cerr << "[FHETCH] ERROR: Cannot write trace to " << path << std::endl;
         return {};
     }
+    if (want_binary && !fhetch::write_fhetch_binary(binary_path, program)) {
+        std::cerr << "[FHETCH] ERROR: Cannot write trace to " << binary_path
+                  << std::endl;
+        return {};
+    }
+    if (!want_text) std::filesystem::remove(path);
 
-    std::cout << "[FHETCH] Trace written: " << path
+    const auto& primary = want_text ? path : binary_path;
+    std::cout << "[FHETCH] Trace written: " << primary
+              << (format_ == TraceFormat::Both ? " (+ .fhex)" : "")
               << " (" << instructions_.size() << " instructions, "
               << modulus_table_.size() << " moduli)" << std::endl;
-    return path;
+    return primary;
 }
 
 void TraceWriter::clear() {

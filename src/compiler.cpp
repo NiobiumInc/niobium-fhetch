@@ -127,6 +127,11 @@ struct Compiler::Impl {
     // --target=<value> on the CLI consumed by init().
     std::string target = "local";
 
+    // Which serialization of the trace to write. Selected via
+    // --trace-format=<value> on the CLI consumed by init(). Independent of
+    // the replay target.
+    TraceFormat trace_format = TraceFormat::Text;
+
     // Optimization level for the compiler-side replay, normalized to "O0".."O3".
     // Defaults to O0 (conservative); overridable via --opt-level=<v> on the CLI.
     // Forwarded to the replay driver (and on to the transport server) so the
@@ -243,6 +248,22 @@ static std::string normalize_opt_level(const std::string& v) {
     return "";
 }
 
+namespace {
+
+// An unrecognized *value* is worth complaining about, unlike an unrecognized
+// flag: the caller clearly meant to choose a format, and silently writing the
+// default would hand them the wrong file.
+TraceFormat parse_trace_format(const std::string& value) {
+    if (value == "text") return TraceFormat::Text;
+    if (value == "binary") return TraceFormat::Binary;
+    if (value == "both") return TraceFormat::Both;
+    std::cerr << "[NIOBIUM] WARNING: unknown --trace-format '" << value
+              << "', expected text|binary|both; using text" << std::endl;
+    return TraceFormat::Text;
+}
+
+}  // namespace
+
 void Compiler::init(int& argc, char** argv) {
     // Parse and consume Niobium-specific flags from argv; unrecognized
     // arguments are left in place for the host program.
@@ -251,6 +272,9 @@ void Compiler::init(int& argc, char** argv) {
     //   --target=<t>          replay target: "local" (default, in-process
     //                         FHETCH sim); any other value hands replay off
     //                         to nbcc_fhetch_replay
+    //   --trace-format=<f>    trace serialization: "text" (default,
+    //                         human-readable .fhetch), "binary" (.fhex, ~4x
+    //                         smaller and faster to read), or "both"
     //   --hollow              hollow recording (trace without real math)
     //   --opt-level=<O0..O3>  optimization level, forwarded on replay handoff
     //   -v                    verbose diagnostics
@@ -276,6 +300,10 @@ void Compiler::init(int& argc, char** argv) {
             impl_->target = a + 9;
         } else if (std::strcmp(a, "--target") == 0 && i + 1 < argc) {
             impl_->target = argv[++i];
+        } else if (std::strncmp(a, "--trace-format=", 15) == 0) {
+            impl_->trace_format = parse_trace_format(a + 15);
+        } else if (std::strcmp(a, "--trace-format") == 0 && i + 1 < argc) {
+            impl_->trace_format = parse_trace_format(argv[++i]);
         } else if (std::strcmp(a, "--montgomery") == 0) {
             impl_->montgomery_mode = true;
         } else if (std::strcmp(a, "--bit_reversal") == 0) {
@@ -301,10 +329,17 @@ void Compiler::init(int& argc, char** argv) {
     }
     argc = write_pos;
 
+    if (impl_->trace_format != TraceFormat::Text) {
+        std::cout << "[NIOBIUM] Trace format: "
+                  << (impl_->trace_format == TraceFormat::Binary ? "binary"
+                                                                : "both")
+                  << std::endl;
+    }
     if (impl_->target != "local") {
         std::cout << "[NIOBIUM] Target: " << impl_->target
                   << " (replay will hand off to nbcc_fhetch_replay)" << std::endl;
     }
+    impl_->trace_writer.set_trace_format(impl_->trace_format);
     if (impl_->montgomery_mode || impl_->bitrev_mode) {
         std::cout << "[NIOBIUM] Hardware data format:"
                   << (impl_->montgomery_mode ? " montgomery" : "")
@@ -1230,7 +1265,12 @@ void Compiler::write_replay_json() {
     json replay;
 
     // ---- program_name / program_info ----
-    replay["program_name"] = prog + ".fhetch";
+    // Name the artifact that was actually written. With --trace-format=binary
+    // there is no .fhetch on disk, so hardcoding that extension would point a
+    // consumer at a file that does not exist.
+    replay["program_name"] =
+        impl_->trace_format == TraceFormat::Binary ? prog + ".fhex"
+                                                  : prog + ".fhetch";
     replay["program_info"] = {
         {"name", impl_->program_name},
         {"version", impl_->program_version},
