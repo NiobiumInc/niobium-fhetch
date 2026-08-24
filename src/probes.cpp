@@ -96,17 +96,54 @@ static uintptr_t map_address(uintptr_t openfhe_id) {
 //  destruction is known to cause register-spill blow-up in the compiler's
 //  equivalent and isn't needed for our uses.)
 
-static std::string addr(uintptr_t a) {
-    return "%" + std::to_string(a);
+// The probe functions live at file scope (they are C entry points), so the IR
+// names are brought in explicitly rather than by being inside the namespace.
+using niobium::fhetch::FhOpcode;
+using niobium::fhetch::Instruction;
+using niobium::TraceWriter;
+using namespace niobium::fhetch;  // NOLINT(google-build-using-namespace) — FH_* enumerators
+
+// Register a modulus and return its table index.
+static uint32_t midx(uint64_t q) {
+    return niobium::detail::trace_writer().register_modulus(q);
 }
 
-static std::string midx(uint64_t q) {
-    uint32_t idx = niobium::detail::trace_writer().register_modulus(q);
-    return "m=" + std::to_string(idx);
+// Build an instruction with its two mandatory operands. Addresses narrow to the
+// IR's 32 bits in TraceWriter::emit(), which refuses anything wider rather than
+// truncating it into a different valid address.
+static Instruction ir(FhOpcode op, uintptr_t d, uintptr_t s1) {
+    Instruction inst;
+    inst.opcode = op;
+    inst.dest = static_cast<uint32_t>(d);
+    inst.src1 = static_cast<uint32_t>(s1);
+    return inst;
 }
 
-static void emit(const std::string& instruction) {
-    niobium::detail::trace_writer().emit(instruction);
+static void emit(const Instruction& inst) {
+    niobium::detail::trace_writer().emit(inst);
+}
+
+/// dest, src1, src2, m=
+static void emit_pp(FhOpcode op, uintptr_t d, uintptr_t s1, uintptr_t s2, uint64_t q) {
+    auto inst = ir(op, d, s1);
+    inst.src2 = static_cast<uint32_t>(s2);
+    inst.modulus = midx(q);
+    emit(inst);
+}
+
+/// dest, src1, imm, m=<index>. Takes the index directly, because the copy and
+/// zero idioms reference the sentinel at index 0 without registering a modulus.
+static void emit_ps_idx(FhOpcode op, uintptr_t d, uintptr_t s1, uint64_t imm,
+                        uint32_t modulus_index) {
+    auto inst = ir(op, d, s1);
+    inst.immediate = imm;
+    inst.modulus = modulus_index;
+    emit(inst);
+}
+
+/// dest, src1, imm, m=
+static void emit_ps(FhOpcode op, uintptr_t d, uintptr_t s1, uint64_t imm, uint64_t q) {
+    emit_ps_idx(op, d, s1, imm, midx(q));
 }
 
 // Data inheritance: tracks which FHETCH address was derived from which.
@@ -263,9 +300,11 @@ void openfhe_cprobe_zero(uintptr_t poly_id, int /*format*/, uint64_t modulus) {
     if (!should_record()) return;
 
     uintptr_t a = map_address(poly_id);
-    std::string mi = (modulus != 0) ? midx(modulus) : "m=0";
-    niobium::detail::trace_writer().emit(
-        "sr_mulps " + addr(a) + ", " + addr(a) + ", 0, " + mi);
+    // Index 0 is the copy/zero sentinel, pre-seeded in the table, so it is
+    // referenced directly rather than registered.
+    const uint32_t mi = (modulus != 0) ? midx(modulus)
+                                       : TraceWriter::COPY_MODULUS_INDEX;
+    emit_ps_idx(FH_SR_MULPS, a, a, 0, mi);
     // Zero overwrites whatever was there — drop any stale clone-parent edge.
     invalidate_clone_parent_on_write(a);
 }
@@ -310,8 +349,8 @@ void openfhe_cprobe_copy(uintptr_t dst_id, uintptr_t src_id) {
     uintptr_t dst_addr = map_address(dst_id);
     g_data_parent[dst_addr] = src_addr;
 
-    niobium::detail::trace_writer().emit(
-        "sr_addps " + addr(dst_addr) + ", " + addr(src_addr) + ", 0, m=0");
+    emit_ps_idx(FH_SR_ADDPS, dst_addr, src_addr, 0,
+                TraceWriter::COPY_MODULUS_INDEX);
 }
 
 void openfhe_cprobe_move(uintptr_t dst_id, uintptr_t src_id) {
@@ -389,8 +428,7 @@ void openfhe_cprobe_add(uintptr_t dst, uintptr_t src1, uintptr_t src2,
     uintptr_t da = map_address(dst);
     uintptr_t s1 = resolve_inplace_src(map_address(src1), da);
     uintptr_t s2 = map_address(src2);
-    emit("sr_addp " + addr(da) + ", " + addr(s1) + ", " + addr(s2) +
-         ", " + midx(modulus));
+    emit_pp(FH_SR_ADDP, da, s1, s2, modulus);
     invalidate_clone_parent_on_write(da);
 }
 
@@ -401,8 +439,7 @@ void openfhe_cprobe_sub(uintptr_t dst, uintptr_t src1, uintptr_t src2,
     uintptr_t da = map_address(dst);
     uintptr_t s1 = resolve_inplace_src(map_address(src1), da);
     uintptr_t s2 = map_address(src2);
-    emit("sr_subp " + addr(da) + ", " + addr(s1) + ", " + addr(s2) +
-         ", " + midx(modulus));
+    emit_pp(FH_SR_SUBP, da, s1, s2, modulus);
     invalidate_clone_parent_on_write(da);
 }
 
@@ -413,8 +450,7 @@ void openfhe_cprobe_mul(uintptr_t dst, uintptr_t src1, uintptr_t src2,
     uintptr_t da = map_address(dst);
     uintptr_t s1 = resolve_inplace_src(map_address(src1), da);
     uintptr_t s2 = map_address(src2);
-    emit("sr_mulp " + addr(da) + ", " + addr(s1) + ", " + addr(s2) +
-         ", " + midx(modulus));
+    emit_pp(FH_SR_MULP, da, s1, s2, modulus);
     invalidate_clone_parent_on_write(da);
 }
 
@@ -424,8 +460,7 @@ void openfhe_cprobe_addi(uintptr_t dst, uintptr_t src, uint64_t immediate,
     std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
-    emit("sr_addps " + addr(da) + ", " + addr(sa) + ", " + std::to_string(immediate) +
-         ", " + midx(modulus));
+    emit_ps(FH_SR_ADDPS, da, sa, immediate, modulus);
     invalidate_clone_parent_on_write(da);
 }
 
@@ -435,8 +470,7 @@ void openfhe_cprobe_subi(uintptr_t dst, uintptr_t src, uint64_t immediate,
     std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
-    emit("sr_subps " + addr(da) + ", " + addr(sa) + ", " + std::to_string(immediate) +
-         ", " + midx(modulus));
+    emit_ps(FH_SR_SUBPS, da, sa, immediate, modulus);
     invalidate_clone_parent_on_write(da);
 }
 
@@ -446,8 +480,7 @@ void openfhe_cprobe_muli(uintptr_t dst, uintptr_t src, uint64_t immediate,
     std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
-    emit("sr_mulps " + addr(da) + ", " + addr(sa) + ", " + std::to_string(immediate) +
-         ", " + midx(modulus));
+    emit_ps(FH_SR_MULPS, da, sa, immediate, modulus);
     invalidate_clone_parent_on_write(da);
 }
 
@@ -461,8 +494,12 @@ void openfhe_cprobe_ntt(uintptr_t dst, uintptr_t src, uint64_t modulus,
     std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
-    emit("sr_ntt " + addr(da) + ", " + addr(sa) + ", " + midx(modulus) +
-         ", omega=" + std::to_string(omega));
+    {
+        auto inst = ir(FH_SR_NTT, da, sa);
+        inst.modulus = midx(modulus);
+        inst.omega = omega;
+        emit(inst);
+    }
     invalidate_clone_parent_on_write(da);
 }
 
@@ -472,8 +509,12 @@ void openfhe_cprobe_intt(uintptr_t dst, uintptr_t src, uint64_t modulus,
     std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
-    emit("sr_intt " + addr(da) + ", " + addr(sa) + ", " + midx(modulus) +
-         ", omega=" + std::to_string(omega));
+    {
+        auto inst = ir(FH_SR_INTT, da, sa);
+        inst.modulus = midx(modulus);
+        inst.omega = omega;
+        emit(inst);
+    }
     invalidate_clone_parent_on_write(da);
 }
 
@@ -488,11 +529,14 @@ void openfhe_cprobe_automorphism(uintptr_t dst, uintptr_t src,
     std::scoped_lock lock(g_probe_mutex);
     uintptr_t da = map_address(dst);
     uintptr_t sa = resolve_inplace_src(map_address(src), da);
-    emit("sr_automorph_eval " + addr(da) + ", " + addr(sa) +
-         ", " + midx(modulus) +
-         ", mask=" + std::to_string(mask) +
-         ", logn=" + std::to_string(logn) +
-         ", k=" + std::to_string(k));
+    {
+        auto inst = ir(FH_SR_AUTOMORPH_EVAL, da, sa);
+        inst.modulus = midx(modulus);
+        inst.mask = mask;
+        inst.logn = static_cast<uint8_t>(logn);
+        inst.k = k;
+        emit(inst);
+    }
     invalidate_clone_parent_on_write(da);
 }
 
@@ -516,21 +560,17 @@ void openfhe_cprobe_switchmodulus(uintptr_t dst, uintptr_t src,
 
     uintptr_t d = map_address(dst);
     uintptr_t s = map_address(src);
-    std::string da = addr(d);
-    std::string sa = addr(s);
+    niobium::detail::trace_writer().comment(
+        "switchmodulus %" + std::to_string(d) + ", %" + std::to_string(s) +
+        ", old_mod=" + std::to_string(old_modulus) +
+        ", new_mod=" + std::to_string(new_modulus));
 
-    emit("# switchmodulus " + da + ", " + sa +
-         ", old_mod=" + std::to_string(old_modulus) +
-         ", new_mod=" + std::to_string(new_modulus));
-
-    // muli dst, src, 1, old_modulus
-    emit("sr_mulps " + da + ", " + sa + ", 1, " + midx(old_modulus));
-    // addi dst, dst, half_om, old_modulus
-    emit("sr_addps " + da + ", " + da + ", " + std::to_string(half_om) + ", " + midx(old_modulus));
-    // muli dst, dst, 1, new_modulus
-    emit("sr_mulps " + da + ", " + da + ", 1, " + midx(new_modulus));
-    // addi dst, dst, neg_half, new_modulus
-    emit("sr_addps " + da + ", " + da + ", " + std::to_string(neg_half) + ", " + midx(new_modulus));
+    // The expansion writes dst four times, reading it back after the first —
+    // legal because operands are addresses, not SSA values.
+    emit_ps(FH_SR_MULPS, d, s, 1, old_modulus);         // muli dst, src, 1
+    emit_ps(FH_SR_ADDPS, d, d, half_om, old_modulus);   // addi dst, dst, half
+    emit_ps(FH_SR_MULPS, d, d, 1, new_modulus);         // muli dst, dst, 1
+    emit_ps(FH_SR_ADDPS, d, d, neg_half, new_modulus);  // addi dst, dst, -half
 
     // SwitchModulus writes to dst four times — its value is now derived from
     // those ops, not from whatever it was copied from earlier. Drop any
