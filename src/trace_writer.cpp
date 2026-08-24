@@ -80,10 +80,6 @@ void TraceWriter::emit(const std::string& instruction) {
     }
 }
 
-void TraceWriter::emit_preamble(const std::string& instruction) {
-    std::scoped_lock lock(mutex_);
-    instructions_.push_back(instruction);
-}
 
 void TraceWriter::comment(const std::string& text) {
     std::scoped_lock lock(mutex_);
@@ -93,6 +89,11 @@ void TraceWriter::comment(const std::string& text) {
 }
 
 void TraceWriter::normalize_modulus_table() {
+    std::scoped_lock lock(mutex_);
+    normalize_modulus_table_locked();
+}
+
+void TraceWriter::normalize_modulus_table_locked() {
     if (modulus_table_.size() <= 1) return;  // only sentinel — nothing to sort
 
     std::vector<uint64_t> regular(modulus_table_.begin() + 1, modulus_table_.end());
@@ -137,7 +138,8 @@ void TraceWriter::normalize_modulus_table() {
 
 std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
                                          const std::string& program_name) {
-    normalize_modulus_table();
+    std::scoped_lock lock(mutex_);
+    normalize_modulus_table_locked();
 
     std::filesystem::create_directories(directory);
     auto path = directory / (program_name + ".fhetch");

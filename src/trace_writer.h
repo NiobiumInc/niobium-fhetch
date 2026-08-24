@@ -43,10 +43,6 @@ public:
     // Emit a FHETCH instruction line into the trace.
     void emit(const std::string& instruction);
 
-    // Emit unconditionally (even before start_recording).
-    // Used for copy instructions that set up the simulator's address space.
-    void emit_preamble(const std::string& instruction);
-
     // Emit a comment line (prefixed with #).
     void comment(const std::string& text);
 
@@ -62,6 +58,14 @@ public:
     // every "m=N" token in recorded instruction strings accordingly.
     // Called automatically from write(); exposed for tests.
     void normalize_modulus_table();
+
+private:
+    // The body of normalize_modulus_table(), without taking mutex_. write()
+    // holds the lock across both the normalize and the file write, so it calls
+    // this rather than the public wrapper — std::mutex is not recursive.
+    void normalize_modulus_table_locked();
+
+public:
 
     size_t instruction_count() const { return instructions_.size(); }
 
