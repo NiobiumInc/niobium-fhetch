@@ -249,6 +249,39 @@ test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release).
 #        -> fhetch_driver (secondary replay, writes ct_result_secondary.bin)
 #        -> decrypt secondary
 # Both decryptions must PASS.
+# Roundtrip with an explicit trace format. $(4) is text|binary|both.
+#
+# Asserts on the artifacts as well as the decrypt: a test that only checks the
+# result would pass while a .fhetch was still being written in binary mode,
+# which is the whole thing being verified.
+define roundtrip-simple-op-format
+	@echo ""
+	@echo "=== Roundtrip $(1) (--trace-format=$(4)) ==="
+	@rm -rf simple_ops_keys simple_ops_server_workload_*
+	@$(BUILD_DIR)/tests/simple_ops_client simple_ops_keys $(2) $(3) 2>&1 | tail -1
+	@$(BUILD_DIR)/tests/simple_ops_server simple_ops_keys $(1) --no-ring-dim-check \
+	    --trace-format=$(4) 2>&1 | grep -E "Complete:|ERROR" | head -3 || true
+	@W=simple_ops_server_workload_simple_ops_op_$(1); \
+	 have_text=$$(ls $$W/*.fhetch 2>/dev/null | wc -l | tr -d ' '); \
+	 have_bin=$$(ls $$W/*.fhex 2>/dev/null | wc -l | tr -d ' '); \
+	 case "$(4)" in \
+	   text)   want_text=1; want_bin=0 ;; \
+	   binary) want_text=0; want_bin=1 ;; \
+	   both)   want_text=1; want_bin=1 ;; \
+	 esac; \
+	 if [ "$$have_text" != "$$want_text" ] || [ "$$have_bin" != "$$want_bin" ]; then \
+	   echo "  FAIL: --trace-format=$(4) wrote .fhetch=$$have_text .fhex=$$have_bin," \
+	        "expected .fhetch=$$want_text .fhex=$$want_bin"; \
+	   exit 1; \
+	 fi; \
+	 echo "  artifacts OK (.fhetch=$$have_text .fhex=$$have_bin)"
+	@echo "  -- decrypt --"
+	@$(BUILD_DIR)/tests/simple_ops_decrypt simple_ops_keys $(1) ct_result.bin 2>&1 \
+	    | grep -E "PASS|FAIL" | grep -q PASS \
+	    || { echo "  FAIL: decrypt did not pass"; exit 1; }
+	@echo "  decrypt PASS"
+endef
+
 define roundtrip-simple-op
 	@echo ""
 	@echo "=== Roundtrip $(1) ==="
@@ -285,6 +318,14 @@ test-roundtrip-simple-ops-release: build-release ## Full roundtrip for all simpl
 	$(call roundtrip-simple-op,ADD_MUL,5,6)
 	$(call roundtrip-simple-op,MUL_MUL,5,6)
 	$(call roundtrip-simple-op,MORPH,5,6)
+
+test-roundtrip-trace-format-release: build-release ## Roundtrip each --trace-format (text/binary/both)
+	$(call set-build-config,Release,build)
+	$(call roundtrip-simple-op-format,ADD,5,6,text)
+	$(call roundtrip-simple-op-format,ADD,5,6,binary)
+	$(call roundtrip-simple-op-format,ADD,5,6,both)
+	$(call roundtrip-simple-op-format,MORPH,5,6,binary)
+	$(call roundtrip-simple-op-format,MUL,5,6,binary)
 
 test-roundtrip-bootstrap-release: build-release ## Full roundtrip for bootstrap (primary + secondary decrypt)
 	$(call set-build-config,Release,build)
@@ -340,6 +381,7 @@ test-release: \
     test-simple-fhetch-release \
     test-fhetch-driver-release \
     test-roundtrip-simple-ops-release \
+    test-roundtrip-trace-format-release \
     test-roundtrip-plaintext-add-release  ## Run all currently-passing Release tests
 
 # Python bindings dev/smoke targets (config/build + roundtrip tests) live in
