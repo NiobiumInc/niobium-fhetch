@@ -83,3 +83,10 @@ set_openfhe_rpath(simulator_liveness)
 
 add_executable(fhetch_ir_test fhetch_ir/test.cpp)
 target_link_libraries(fhetch_ir_test PRIVATE niobium_fhetch)
+
+# ==============================================================================
+# Binary sidecar (.fhex) round-trip. Needs no OpenFHE, so no RPATH help.
+# ==============================================================================
+
+add_executable(fhex_roundtrip fhex_roundtrip/test.cpp)
+target_link_libraries(fhex_roundtrip PRIVATE niobium_fhetch)

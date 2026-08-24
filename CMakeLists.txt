@@ -107,6 +107,7 @@ set(LIB_SOURCES
     src/auto_facade.cpp
     src/compiler.cpp
     src/fhetch_api.cpp
+    src/fhetch_encoding.cpp
     src/fhetch_parser.cpp
     src/fhetch_sim/instruction.cpp
     src/fhetch_sim/simulator.cpp
