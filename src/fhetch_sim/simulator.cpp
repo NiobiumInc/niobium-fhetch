@@ -5,7 +5,7 @@
 // OpenFHE modular arithmetic.
 
 #include "niobium/fhetch_sim/simulator.h"
-#include "instruction.h"
+#include "niobium/fhetch_reader.h"
 #include "memory.h"
 
 #include <chrono>
@@ -35,20 +35,38 @@ using namespace lbcrypto;
 
 namespace niobium::fhetch_sim {
 
+// The IR, the reader, and the opcode vocabulary all live in niobium::fhetch.
+// Pulled in by name so the FH_* enumerators and Instruction read as they did
+// when this file had its own parser beside it.
+using namespace niobium::fhetch;  // NOLINT(google-build-using-namespace)
+
 // ============================================================================
 // Impl
 // ============================================================================
 
 struct Simulator::Impl {
     uint64_t ring_dim = 0;
-    ParsedTrace trace;
+    Program trace;
     Memory memory;
     size_t error_count = 0;
 
-    // Resolve a modulus index to the actual value
-    uint64_t resolve_modulus(uint32_t idx) const {
-        if (idx < trace.modulus_table.size())
-            return trace.modulus_table[idx];
+    // Resolve an instruction's modulus to its value.
+    //
+    // A `m=<N>` in the text is an index into the table unless the reader
+    // judged it a literal prime (see read_fhetch_text()). An index outside the
+    // table is an error: this used to return 0 silently, which meant the
+    // arithmetic below ran modulo zero on a trace the reader had mis-read.
+    uint64_t resolve_modulus(const Instruction& inst) {
+        if (!inst.modulus.has_value()) {
+            error(inst, "instruction has no modulus");
+            return 0;
+        }
+        const uint64_t m = *inst.modulus;
+        if (inst.modulus_is_literal) return m;
+        if (m < trace.modulus_table.size()) return trace.modulus_table[m];
+        error(inst, "modulus index " + std::to_string(m) +
+                        " is outside the table of " +
+                        std::to_string(trace.modulus_table.size()) + " entries");
         return 0;
     }
 
@@ -81,43 +99,42 @@ struct Simulator::Impl {
         // No-ops: comments, unknowns, halt, and unimplemented stubs
         // (execute() runs these as bare `ok = true`, no memory.set, so
         // for liveness they neither read nor write).
-        case OpCode::COMMENT:
-        case OpCode::UNKNOWN:
-        case OpCode::HALT:
-        case OpCode::SR_PERMUTE:
-        case OpCode::SR_AUTOMORPH_COEFF:
-        case OpCode::SR_NEGP_NI:
-        case OpCode::SR_FT:
-        case OpCode::SR_IFT:
-        case OpCode::SR_ADDP_NI:
-        case OpCode::SR_SUBP_NI:
-        case OpCode::SR_MULP_NI:
-        case OpCode::SR_ADDPS_NI:
-        case OpCode::SR_SUBPS_NI:
-        case OpCode::SR_MULPS_NI:
-        case OpCode::SR_ADDPS_COEFF_NI:
-        case OpCode::SR_SUBPS_COEFF_NI:
+        case FH_ILL:
+        case FH_HALT:
+        case FH_SR_PERMUTE:
+        case FH_SR_AUTOMORPH_COEFF:
+        case FH_SR_NEGP_NI:
+        case FH_SR_FT:
+        case FH_SR_IFT:
+        case FH_SR_ADDP_NI:
+        case FH_SR_SUBP_NI:
+        case FH_SR_MULP_NI:
+        case FH_SR_ADDPS_NI:
+        case FH_SR_SUBPS_NI:
+        case FH_SR_MULPS_NI:
+        case FH_SR_ADDPS_COEFF_NI:
+        case FH_SR_SUBPS_COEFF_NI:
             return {.write = 0, .writes = false, .reads = {0, 0}, .n_reads = 0};
 
         // sr_mulps with imm=0 writes a zero vector and reads nothing
         // (see exec_mulps); the other immediate-form ops read src1.
-        case OpCode::SR_MULPS:
-            return inst.immediate == 0
+        case FH_SR_MULPS:
+            return inst.immediate.value_or(0) == 0
                 ? InstUses{.write = inst.dest, .writes = true,
                            .reads = {0, 0}, .n_reads = 0}
                 : InstUses{.write = inst.dest, .writes = true,
                            .reads = {inst.src1, 0}, .n_reads = 1};
 
         // One-source ops: write dest, read src1.
-        case OpCode::SR_NEGP:
-        case OpCode::SR_NTT:
-        case OpCode::SR_INTT:
-        case OpCode::SR_AUTOMORPH_EVAL:
-        case OpCode::SR_ROT_AUTOMORPH_COEFF:
-        case OpCode::SR_ADDPS:
-        case OpCode::SR_SUBPS:
-        case OpCode::SR_ADDPS_COEFF:
-        case OpCode::SR_SUBPS_COEFF:
+        case FH_SR_NEGP:
+        case FH_SR_NTT:
+        case FH_SR_INTT:
+        case FH_SR_AUTOMORPH_EVAL:
+        case FH_SR_ROT_AUTOMORPH_COEFF:
+        case FH_SR_ADDPS:
+        case FH_SR_SUBPS:
+        case FH_SR_ADDPS_COEFF:
+        case FH_SR_SUBPS_COEFF:
             return {.write = inst.dest, .writes = true,
                     .reads = {inst.src1, 0}, .n_reads = 1};
 
@@ -137,22 +154,35 @@ struct Simulator::Impl {
         if (warned_uninit_addrs.insert(addr).second) {
             std::cerr << "[FHETCH_SIM] WARNING: read from uninitialized address %"
                       << addr << " (first seen at line " << inst.line_number
-                      << ": " << inst.raw_line << ")" << std::endl;
+                      << ": " << describe(inst) << ")" << std::endl;
         }
         scratch.assign(ring_dim, 0);
         return scratch;
     }
 
+    // Short form of an instruction for diagnostics. The IR deliberately does
+    // not carry its source line — raw text is the reader's and writer's
+    // business — so this renders just enough to locate the instruction.
+    // Once the shared writer lands, render() replaces this.
+    static std::string describe(const Instruction& inst) {
+        const char* m = fh_opcode_mnemonic(inst.opcode);
+        std::string out = m ? m : "<unknown opcode>";
+        if (fh_opcode_has_operands(inst.opcode))
+            out += " %" + std::to_string(inst.dest) + ", %" +
+                   std::to_string(inst.src1);
+        return out;
+    }
+
     void error(const Instruction& inst, const std::string& msg) {
         std::cerr << "[FHETCH_SIM] ERROR line " << inst.line_number
-                  << ": " << msg << "\n  " << inst.raw_line << std::endl;
+                  << ": " << msg << "\n  " << describe(inst) << std::endl;
         error_count++;
     }
 
     // --- Arithmetic dispatch ---
 
     bool exec_addp(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch1;
         std::vector<uint64_t> scratch2;
         const auto& a = get_or_zero(inst.src1, scratch1, inst);
@@ -177,7 +207,7 @@ struct Simulator::Impl {
     }
 
     bool exec_subp(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch1;
         std::vector<uint64_t> scratch2;
         const auto& a = get_or_zero(inst.src1, scratch1, inst);
@@ -202,7 +232,7 @@ struct Simulator::Impl {
     }
 
     bool exec_mulp(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch1;
         std::vector<uint64_t> scratch2;
         const auto& a = get_or_zero(inst.src1, scratch1, inst);
@@ -227,14 +257,14 @@ struct Simulator::Impl {
     }
 
     bool exec_addps(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
 
         // Special case: immediate 0 = copy (no modular reduction).
         // Used by copy probes where the modulus may not match the data.
-        if (inst.immediate == 0) {
+        if (inst.immediate.value_or(0) == 0) {
             auto& out = memory.reserve_dest(inst.dest);
             // When dest == src1, `&out == &a` and the copy is a no-op
             // — skip to keep std::copy well-defined.
@@ -246,7 +276,7 @@ struct Simulator::Impl {
         }
 
         NativeInteger mod(q);
-        NativeInteger imm(inst.immediate);
+        NativeInteger imm(inst.immediate.value_or(0));
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModAddEq(imm);
@@ -257,13 +287,13 @@ struct Simulator::Impl {
     }
 
     bool exec_subps(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
 
         NativeInteger mod(q);
-        NativeInteger imm(inst.immediate);
+        NativeInteger imm(inst.immediate.value_or(0));
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModSubEq(imm);
@@ -274,10 +304,10 @@ struct Simulator::Impl {
     }
 
     bool exec_mulps(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
 
         // Special case: multiply by 0 always produces zero
-        if (inst.immediate == 0) {
+        if (inst.immediate.value_or(0) == 0) {
             auto& out = memory.reserve_dest(inst.dest);
             std::fill(out.begin(), out.end(), 0);
             memory.commit_dest(inst.dest, q);
@@ -289,7 +319,7 @@ struct Simulator::Impl {
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
 
         NativeInteger mod(q);
-        NativeInteger imm(inst.immediate);
+        NativeInteger imm(inst.immediate.value_or(0));
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
         va.ModMulEq(imm);
@@ -300,7 +330,7 @@ struct Simulator::Impl {
     }
 
     bool exec_negp(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
@@ -313,7 +343,7 @@ struct Simulator::Impl {
     }
 
     bool exec_ntt(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
@@ -345,7 +375,7 @@ struct Simulator::Impl {
     //   for (j=0, jk=k; j < N; ++j, jk += 2k):
     //       result[ReverseBits(j, logn)] = values[ReverseBits((jk>>1)&mask, logn)]
     bool exec_automorph_eval(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
@@ -391,7 +421,7 @@ struct Simulator::Impl {
         // with a sign flip when the read wraps past N (because X^N = -1).
         // This is multiplication by X^{-offset} (= X^{2N-offset}) in
         // R_q = Z_q[X]/(X^N+1), a left shift of the coefficient vector.
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
@@ -420,7 +450,7 @@ struct Simulator::Impl {
     }
 
     bool exec_intt(const Instruction& inst) {
-        uint64_t q = resolve_modulus(inst.modulus_index);
+        uint64_t q = resolve_modulus(inst);
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
@@ -468,24 +498,24 @@ struct Simulator::Impl {
             bool ok = true;
 
             switch (inst.opcode) {
-            case OpCode::SR_ADDP:        ok = exec_addp(inst);  break;
-            case OpCode::SR_SUBP:        ok = exec_subp(inst);  break;
-            case OpCode::SR_MULP:        ok = exec_mulp(inst);  break;
-            case OpCode::SR_ADDPS:
-            case OpCode::SR_ADDPS_COEFF: ok = exec_addps(inst); break;
-            case OpCode::SR_SUBPS:
-            case OpCode::SR_SUBPS_COEFF: ok = exec_subps(inst); break;
-            case OpCode::SR_MULPS:       ok = exec_mulps(inst); break;
-            case OpCode::SR_NEGP:        ok = exec_negp(inst);  break;
-            case OpCode::SR_NTT:         ok = exec_ntt(inst);   break;
-            case OpCode::SR_INTT:        ok = exec_intt(inst);  break;
+            case FH_SR_ADDP:        ok = exec_addp(inst);  break;
+            case FH_SR_SUBP:        ok = exec_subp(inst);  break;
+            case FH_SR_MULP:        ok = exec_mulp(inst);  break;
+            case FH_SR_ADDPS:
+            case FH_SR_ADDPS_COEFF: ok = exec_addps(inst); break;
+            case FH_SR_SUBPS:
+            case FH_SR_SUBPS_COEFF: ok = exec_subps(inst); break;
+            case FH_SR_MULPS:       ok = exec_mulps(inst); break;
+            case FH_SR_NEGP:        ok = exec_negp(inst);  break;
+            case FH_SR_NTT:         ok = exec_ntt(inst);   break;
+            case FH_SR_INTT:        ok = exec_intt(inst);  break;
 
-            case OpCode::SR_AUTOMORPH_EVAL: ok = exec_automorph_eval(inst); break;
+            case FH_SR_AUTOMORPH_EVAL: ok = exec_automorph_eval(inst); break;
 
-            case OpCode::SR_ROT_AUTOMORPH_COEFF: ok = exec_rot_automorph_coeff(inst); break;
+            case FH_SR_ROT_AUTOMORPH_COEFF: ok = exec_rot_automorph_coeff(inst); break;
 
-            case OpCode::SR_PERMUTE:
-            case OpCode::SR_AUTOMORPH_COEFF:
+            case FH_SR_PERMUTE:
+            case FH_SR_AUTOMORPH_COEFF:
                 // TODO: general permutation and Galois X^k in coefficient form
                 // not yet implemented; the eval-form Galois automorphism and
                 // the negacyclic-coefficient rotation handlers above cover
@@ -494,26 +524,25 @@ struct Simulator::Impl {
                 break;
 
             // Non-integer ops: pass through (no modular reduction)
-            case OpCode::SR_ADDP_NI:
-            case OpCode::SR_SUBP_NI:
-            case OpCode::SR_MULP_NI:
-            case OpCode::SR_ADDPS_NI:
-            case OpCode::SR_SUBPS_NI:
-            case OpCode::SR_MULPS_NI:
-            case OpCode::SR_ADDPS_COEFF_NI:
-            case OpCode::SR_SUBPS_COEFF_NI:
-            case OpCode::SR_NEGP_NI:
-            case OpCode::SR_FT:
-            case OpCode::SR_IFT:
+            case FH_SR_ADDP_NI:
+            case FH_SR_SUBP_NI:
+            case FH_SR_MULP_NI:
+            case FH_SR_ADDPS_NI:
+            case FH_SR_SUBPS_NI:
+            case FH_SR_MULPS_NI:
+            case FH_SR_ADDPS_COEFF_NI:
+            case FH_SR_SUBPS_COEFF_NI:
+            case FH_SR_NEGP_NI:
+            case FH_SR_FT:
+            case FH_SR_IFT:
                 ok = true;  // TODO: non-integer arithmetic
                 break;
 
-            case OpCode::HALT:
+            case FH_HALT:
                 ok = true;
                 break;
 
-            case OpCode::COMMENT:
-            case OpCode::UNKNOWN:
+            case FH_ILL:
                 ok = true;
                 break;
             }
@@ -525,7 +554,7 @@ struct Simulator::Impl {
                 if (memory.is_initialized(inst.dest)) {
                     const auto& v = memory.get(inst.dest).values;
                     std::cout << "[FHETCH_SIM-DBG] #" << i
-                              << " " << inst.raw_line
+                              << " " << describe(inst)
                               << "  →  %" << inst.dest
                               << " v[0..3]=" << (!v.empty()?v[0]:0)
                               << "," << (v.size()>1?v[1]:0)
@@ -590,14 +619,25 @@ void Simulator::set_ring_dimension(uint64_t N) {
 }
 
 bool Simulator::load_trace(const std::filesystem::path& trace_file) {
-    std::ifstream in(trace_file);
-    if (!in.is_open()) {
-        std::cerr << "[FHETCH_SIM] Cannot open: " << trace_file << std::endl;
+    ReadResult result = read_fhetch_file(trace_file);
+
+    // Warnings are lines the reader skipped but could carry on past — an
+    // opcode from a newer writer, a malformed operand list. Reported rather
+    // than swallowed, because a skipped instruction changes what runs.
+    for (const auto& w : result.warnings) {
+        std::cerr << "[FHETCH_SIM] WARNING line " << w.line_number << ": "
+                  << w.message << std::endl;
+    }
+    if (!result.ok) {
+        for (const auto& e : result.errors) {
+            std::cerr << "[FHETCH_SIM] ERROR line " << e.line_number << ": "
+                      << e.message << std::endl;
+        }
+        std::cerr << "[FHETCH_SIM] Cannot load: " << trace_file << std::endl;
         return false;
     }
-    std::string content((std::istreambuf_iterator<char>(in)),
-                        std::istreambuf_iterator<char>());
-    impl_->trace = parse_trace(content);
+
+    impl_->trace = std::move(result.program);
 
     std::cout << "[FHETCH_SIM] Loaded: " << trace_file << "\n"
               << "  Modulus table: " << impl_->trace.modulus_table.size() << " entries\n"

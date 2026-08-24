@@ -111,7 +111,6 @@ set(LIB_SOURCES
     src/fhetch_parser.cpp
     src/fhetch_reader.cpp
     src/fhetch_writer.cpp
-    src/fhetch_sim/instruction.cpp
     src/fhetch_sim/simulator.cpp
     src/local_replay.cpp
     src/probes.cpp
