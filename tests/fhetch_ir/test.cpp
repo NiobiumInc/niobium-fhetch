@@ -179,7 +179,10 @@ bool test_accessors_are_constexpr() {
     static_assert(!fh_opcode_has_operands(FH_HALT));
     static_assert(!fh_opcode_has_operands(FH_ILL));
     static_assert(fh_operand_form(FH_SR_NTT) == OperandForm::Ntt);
-    static_assert(fh_opcode_info(FH_SR_ADDP) != nullptr);
+    // Assert on the row's content rather than on the pointer being non-null:
+    // the address of a constexpr table entry is provably non-null, which GCC
+    // reports as -Waddress. Checking the opcode is the stronger claim anyway.
+    static_assert(fh_opcode_info(FH_SR_ADDP)->opcode == FH_SR_ADDP);
     static_assert(fh_opcode_info(FH_ILL) == nullptr);
     static_assert(fh_opcode_from_mnemonic("sr_addp").has_value());
     static_assert(!fh_opcode_from_mnemonic("nope").has_value());
