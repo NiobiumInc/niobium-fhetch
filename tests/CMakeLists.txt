@@ -90,3 +90,10 @@ target_link_libraries(fhetch_ir_test PRIVATE niobium_fhetch)
 
 add_executable(fhex_roundtrip fhex_roundtrip/test.cpp)
 target_link_libraries(fhex_roundtrip PRIVATE niobium_fhetch)
+
+# ==============================================================================
+# Trace reader — text and binary. Needs no OpenFHE.
+# ==============================================================================
+
+add_executable(fhetch_reader_test fhetch_reader/test.cpp)
+target_link_libraries(fhetch_reader_test PRIVATE niobium_fhetch)
