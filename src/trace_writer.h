@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "niobium/compiler.h"
 #include "niobium/fhetch_ir.h"
 
 #include <cstdint>
@@ -31,6 +32,8 @@ public:
     void set_source_info(const std::string& file, int line,
                          const std::string& timestamp);
 
+    // Which serialization write() produces. Text by default.
+    void set_trace_format(TraceFormat format) { format_ = format; }
 
     bool is_recording() const { return recording_; }
     void start_recording();
@@ -57,8 +60,9 @@ public:
     // them back where they were — recorded traces interleave them heavily.
     void comment(const std::string& text);
 
-    // Write the accumulated trace to a .fhetch file.
-    // Returns the path written.
+    // Write the accumulated trace. Returns the path of the primary artifact —
+    // the .fhex when the format is binary, the .fhetch otherwise — which is
+    // what a caller hands on to replay.
     std::filesystem::path write(const std::filesystem::path& directory,
                                 const std::string& program_name);
 
@@ -86,6 +90,7 @@ public:
     const std::vector<uint64_t>& modulus_table() const { return modulus_table_; }
 
 private:
+    TraceFormat format_ = TraceFormat::Text;
     bool recording_ = false;
     bool paused_ = false;
     std::string program_name_;

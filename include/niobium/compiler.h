@@ -42,6 +42,13 @@ namespace niobium {
 /// four overloads in fhetch_api.h.
 enum class CapturedKind : uint8_t { SRP, MRP, SRPArray, MRPArray };
 
+/// Which serialization of the recorded trace to write.
+///
+/// Selected with `--trace-format=<text|binary|both>` on the CLI consumed by
+/// init(). The two forms describe the same program; the binary one is smaller
+/// and faster to read, and the text one is human-readable.
+enum class TraceFormat : uint8_t { Text, Binary, Both };
+
 /// Per-record shape returned by the for_each_captured_* helpers in
 /// compiler_internal.h. per_element_moduli has size 1 for SRP / MRP
 /// (the element's moduli list) and size K for SRPArray / MRPArray
