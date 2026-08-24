@@ -82,19 +82,74 @@ static void remember_modulus(uintptr_t a, uint64_t q) {
 // Helper: emit a FHETCH instruction to the trace
 // ============================================================================
 
-static void emit(const std::string& instruction) {
-    niobium::detail::trace_writer().emit(instruction);
+// Register a modulus and return its table index.
+static uint32_t midx(uint64_t q) {
+    return niobium::detail::trace_writer().register_modulus(q);
 }
 
-// Register a modulus and return "m=<index>" for the trace
-static std::string midx(uint64_t q) {
-    uint32_t idx = niobium::detail::trace_writer().register_modulus(q);
-    return "m=" + std::to_string(idx);
+// ---------------------------------------------------------------------------
+// Instruction builders
+// ---------------------------------------------------------------------------
+// One helper per operand shape, mirroring OperandForm. Building an Instruction
+// rather than formatting a line means text and binary come from the one writer,
+// and the modulus normalization at write time is a field remap rather than a
+// search-and-replace over formatted strings.
+//
+// Addresses narrow to the IR's 32 bits in TraceWriter::emit(), which refuses
+// anything wider rather than truncating it into a different valid address.
+
+static Instruction ir(FhOpcode op, uintptr_t d, uintptr_t s1) {
+    Instruction inst;
+    inst.opcode = op;
+    inst.dest = static_cast<uint32_t>(d);
+    inst.src1 = static_cast<uint32_t>(s1);
+    return inst;
 }
 
-// Format an address as %N
-static std::string addr(uintptr_t a) {
-    return "%" + std::to_string(a);
+static void emit(const Instruction& inst) {
+    niobium::detail::trace_writer().emit(inst);
+}
+
+/// dest, src1, src2, m=
+static void emit_pp(FhOpcode op, uintptr_t d, uintptr_t s1, uintptr_t s2, uint64_t q) {
+    auto inst = ir(op, d, s1);
+    inst.src2 = static_cast<uint32_t>(s2);
+    inst.modulus = midx(q);
+    emit(inst);
+}
+
+/// dest, src1, src2 — non-integer, so there is no ring to reduce into
+static void emit_pp_ni(FhOpcode op, uintptr_t d, uintptr_t s1, uintptr_t s2) {
+    auto inst = ir(op, d, s1);
+    inst.src2 = static_cast<uint32_t>(s2);
+    emit(inst);
+}
+
+/// dest, src1, imm, m=
+static void emit_ps(FhOpcode op, uintptr_t d, uintptr_t s1, uint64_t imm, uint64_t q) {
+    auto inst = ir(op, d, s1);
+    inst.immediate = imm;
+    inst.modulus = midx(q);
+    emit(inst);
+}
+
+/// dest, src1, imm — non-integer, so the immediate is floating point
+static void emit_ps_ni(FhOpcode op, uintptr_t d, uintptr_t s1, double imm) {
+    auto inst = ir(op, d, s1);
+    inst.fp_immediate = imm;
+    emit(inst);
+}
+
+/// dest, src1, m=
+static void emit_un(FhOpcode op, uintptr_t d, uintptr_t s1, uint64_t q) {
+    auto inst = ir(op, d, s1);
+    inst.modulus = midx(q);
+    emit(inst);
+}
+
+/// dest, src1
+static void emit_un_ni(FhOpcode op, uintptr_t d, uintptr_t s1) {
+    emit(ir(op, d, s1));
 }
 
 // ============================================================================
@@ -504,14 +559,16 @@ void tag_input(const std::string& name, const SRPArray& arr) {
 }
 
 void tag_output(const std::string& name, const Polynomial& p) {
-    emit("# output " + name + " " + addr(p.impl()->address));
+    niobium::detail::trace_writer().comment(
+        "output " + name + " %" + std::to_string(p.impl()->address));
     ProbeEntry e; e.name = name; e.kind = ProbeEntry::POLY; e.poly = p;
     probe_registry().push_back(std::move(e));
 }
 
 void tag_output(const std::string& name, const MRP& m) {
     for (auto q : m.base())
-        emit("# output " + name + " " + addr(m[q].impl()->address));
+        niobium::detail::trace_writer().comment(
+            "output " + name + " %" + std::to_string(m[q].impl()->address));
     ProbeEntry e; e.name = name; e.kind = ProbeEntry::MRP_KIND; e.mrp = m;
     probe_registry().push_back(std::move(e));
 }
@@ -578,9 +635,7 @@ Polynomial sr_addp(const Polynomial& a, const Polynomial& b, uint64_t q) {
     remember_modulus(a.impl()->address, q);
     remember_modulus(b.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_addp " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + addr(b.impl()->address) +
-         ", " + midx(q));
+    emit_pp(FH_SR_ADDP, result.impl()->address, a.impl()->address, b.impl()->address, q);
     return result;
 }
 
@@ -597,9 +652,7 @@ Polynomial sr_addps(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_addps " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " +
-         std::to_string(s.impl()->int_value) + ", " + midx(q));
+    emit_ps(FH_SR_ADDPS, result.impl()->address, a.impl()->address, s.impl()->int_value, q);
     return result;
 }
 
@@ -607,9 +660,7 @@ Polynomial sr_addps_coeff(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a, Format::Coefficient);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_addps_coeff " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " +
-         std::to_string(s.impl()->int_value) + ", " + midx(q));
+    emit_ps(FH_SR_ADDPS_COEFF, result.impl()->address, a.impl()->address, s.impl()->int_value, q);
     return result;
 }
 
@@ -617,8 +668,7 @@ Polynomial sr_negp(const Polynomial& a, uint64_t q) {
     auto result = make_result(a);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_negp " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + midx(q));
+    emit_un(FH_SR_NEGP, result.impl()->address, a.impl()->address, q);
     return result;
 }
 
@@ -627,9 +677,7 @@ Polynomial sr_subp(const Polynomial& a, const Polynomial& b, uint64_t q) {
     remember_modulus(a.impl()->address, q);
     remember_modulus(b.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_subp " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + addr(b.impl()->address) +
-         ", " + midx(q));
+    emit_pp(FH_SR_SUBP, result.impl()->address, a.impl()->address, b.impl()->address, q);
     return result;
 }
 
@@ -637,9 +685,7 @@ Polynomial sr_subps(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_subps " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " +
-         std::to_string(s.impl()->int_value) + ", " + midx(q));
+    emit_ps(FH_SR_SUBPS, result.impl()->address, a.impl()->address, s.impl()->int_value, q);
     return result;
 }
 
@@ -647,9 +693,7 @@ Polynomial sr_subps_coeff(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a, Format::Coefficient);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_subps_coeff " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " +
-         std::to_string(s.impl()->int_value) + ", " + midx(q));
+    emit_ps(FH_SR_SUBPS_COEFF, result.impl()->address, a.impl()->address, s.impl()->int_value, q);
     return result;
 }
 
@@ -658,9 +702,7 @@ Polynomial sr_mulp(const Polynomial& a, const Polynomial& b, uint64_t q) {
     remember_modulus(a.impl()->address, q);
     remember_modulus(b.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_mulp " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + addr(b.impl()->address) +
-         ", " + midx(q));
+    emit_pp(FH_SR_MULP, result.impl()->address, a.impl()->address, b.impl()->address, q);
     return result;
 }
 
@@ -668,9 +710,7 @@ Polynomial sr_mulps(const Polynomial& a, const Scalar& s, uint64_t q) {
     auto result = make_result(a);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_mulps " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " +
-         std::to_string(s.impl()->int_value) + ", " + midx(q));
+    emit_ps(FH_SR_MULPS, result.impl()->address, a.impl()->address, s.impl()->int_value, q);
     return result;
 }
 
@@ -678,8 +718,7 @@ Polynomial sr_ntt(const Polynomial& a, uint64_t q) {
     auto result = make_result(a, Format::Evaluation);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_ntt " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + midx(q));
+    emit_un(FH_SR_NTT, result.impl()->address, a.impl()->address, q);
     return result;
 }
 
@@ -687,8 +726,7 @@ Polynomial sr_intt(const Polynomial& a, uint64_t q) {
     auto result = make_result(a, Format::Coefficient);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_intt " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + midx(q));
+    emit_un(FH_SR_INTT, result.impl()->address, a.impl()->address, q);
     return result;
 }
 
@@ -699,13 +737,12 @@ Polynomial sr_permute(const Polynomial& a,
     auto result = make_result(a);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_permute " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + midx(q));
+    emit_un(FH_SR_PERMUTE, result.impl()->address, a.impl()->address, q);
     return result;
 }
 
 void halt() {
-    emit("halt");
+    emit(ir(FH_HALT, 0, 0));
 }
 
 // ============================================================================
@@ -714,64 +751,55 @@ void halt() {
 
 Polynomial sr_addp_ni(const Polynomial& a, const Polynomial& b) {
     auto result = make_result(a);
-    emit("sr_addp_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + addr(b.impl()->address));
+    emit_pp_ni(FH_SR_ADDP_NI, result.impl()->address, a.impl()->address, b.impl()->address);
     return result;
 }
 
 Polynomial sr_addps_ni(const Polynomial& a, const Scalar& s) {
     auto result = make_result(a);
-    emit("sr_addps_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + std::to_string(s.impl()->fp_value));
+    emit_ps_ni(FH_SR_ADDPS_NI, result.impl()->address, a.impl()->address, s.impl()->fp_value);
     return result;
 }
 
 Polynomial sr_addps_coeff_ni(const Polynomial& a, const Scalar& s) {
     auto result = make_result(a, Format::Coefficient);
-    emit("sr_addps_coeff_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + std::to_string(s.impl()->fp_value));
+    emit_ps_ni(FH_SR_ADDPS_COEFF_NI, result.impl()->address, a.impl()->address, s.impl()->fp_value);
     return result;
 }
 
 Polynomial sr_negp_ni(const Polynomial& a) {
     auto result = make_result(a);
-    emit("sr_negp_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address));
+    emit_un_ni(FH_SR_NEGP_NI, result.impl()->address, a.impl()->address);
     return result;
 }
 
 Polynomial sr_subp_ni(const Polynomial& a, const Polynomial& b) {
     auto result = make_result(a);
-    emit("sr_subp_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + addr(b.impl()->address));
+    emit_pp_ni(FH_SR_SUBP_NI, result.impl()->address, a.impl()->address, b.impl()->address);
     return result;
 }
 
 Polynomial sr_subps_ni(const Polynomial& a, const Scalar& s) {
     auto result = make_result(a);
-    emit("sr_subps_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + std::to_string(s.impl()->fp_value));
+    emit_ps_ni(FH_SR_SUBPS_NI, result.impl()->address, a.impl()->address, s.impl()->fp_value);
     return result;
 }
 
 Polynomial sr_subps_coeff_ni(const Polynomial& a, const Scalar& s) {
     auto result = make_result(a, Format::Coefficient);
-    emit("sr_subps_coeff_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + std::to_string(s.impl()->fp_value));
+    emit_ps_ni(FH_SR_SUBPS_COEFF_NI, result.impl()->address, a.impl()->address, s.impl()->fp_value);
     return result;
 }
 
 Polynomial sr_mulp_ni(const Polynomial& a, const Polynomial& b) {
     auto result = make_result(a);
-    emit("sr_mulp_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + addr(b.impl()->address));
+    emit_pp_ni(FH_SR_MULP_NI, result.impl()->address, a.impl()->address, b.impl()->address);
     return result;
 }
 
 Polynomial sr_mulps_ni(const Polynomial& a, const Scalar& s) {
     auto result = make_result(a);
-    emit("sr_mulps_ni " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address) + ", " + std::to_string(s.impl()->fp_value));
+    emit_ps_ni(FH_SR_MULPS_NI, result.impl()->address, a.impl()->address, s.impl()->fp_value);
     return result;
 }
 
@@ -781,15 +809,13 @@ Polynomial sr_mulps_ni(const Polynomial& a, const Scalar& s) {
 
 Polynomial sr_ft(const Polynomial& a) {
     auto result = make_result(a, Format::Evaluation);
-    emit("sr_ft " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address));
+    emit_un_ni(FH_SR_FT, result.impl()->address, a.impl()->address);
     return result;
 }
 
 Polynomial sr_ift(const Polynomial& a) {
     auto result = make_result(a, Format::Coefficient);
-    emit("sr_ift " + addr(result.impl()->address) + ", " +
-         addr(a.impl()->address));
+    emit_un_ni(FH_SR_IFT, result.impl()->address, a.impl()->address);
     return result;
 }
 
@@ -832,9 +858,12 @@ Polynomial sr_automorph_eval(const Polynomial& x, uint64_t k) {
     // transport trace-modulus contract (see copy_residue).
     constexpr uint64_t kCopyModulus = 0xFFFFFFFFFFFFFFFFULL;
     auto result = make_result(x);
-    emit("sr_automorph_eval " + addr(result.impl()->address) + ", " +
-         addr(x.impl()->address) + ", k=" + std::to_string(k) +
-         ", " + midx(kCopyModulus));
+    {
+        auto inst = ir(FH_SR_AUTOMORPH_EVAL, result.impl()->address, x.impl()->address);
+        inst.k = k;
+        inst.modulus = midx(kCopyModulus);
+        emit(inst);
+    }
     return result;
 }
 
@@ -847,9 +876,12 @@ Polynomial sr_automorph_eval(const Polynomial& x, uint64_t k, uint64_t q) {
     // replay's probe serialization requires.
     constexpr uint64_t kCopyModulus = 0xFFFFFFFFFFFFFFFFULL;
     auto result = make_result(x);
-    emit("sr_automorph_eval " + addr(result.impl()->address) + ", " +
-         addr(x.impl()->address) + ", k=" + std::to_string(k) +
-         ", " + midx(kCopyModulus));
+    {
+        auto inst = ir(FH_SR_AUTOMORPH_EVAL, result.impl()->address, x.impl()->address);
+        inst.k = k;
+        inst.modulus = midx(kCopyModulus);
+        emit(inst);
+    }
     remember_modulus(x.impl()->address, q);
     remember_modulus(result.impl()->address, q);
     return result;
@@ -861,9 +893,12 @@ Polynomial sr_automorph_coeff(const Polynomial& x, uint64_t k, uint64_t q) {
     // modulus (transport trace-modulus contract; see copy_residue).
     remember_modulus(x.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_automorph_coeff " + addr(result.impl()->address) + ", " +
-         addr(x.impl()->address) + ", k=" + std::to_string(k) +
-         ", " + midx(q));
+    {
+        auto inst = ir(FH_SR_AUTOMORPH_COEFF, result.impl()->address, x.impl()->address);
+        inst.k = k;
+        inst.modulus = midx(q);
+        emit(inst);
+    }
     return result;
 }
 
@@ -871,9 +906,12 @@ Polynomial sr_rot_automorph_coeff(const Polynomial& x, uint64_t offset, uint64_t
     auto result = make_result(x, Format::Coefficient);
     remember_modulus(x.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit("sr_rot_automorph_coeff " + addr(result.impl()->address) + ", " +
-         addr(x.impl()->address) + ", offset=" + std::to_string(offset) +
-         ", " + midx(q));
+    {
+        auto inst = ir(FH_SR_ROT_AUTOMORPH_COEFF, result.impl()->address, x.impl()->address);
+        inst.offset = offset;
+        inst.modulus = midx(q);
+        emit(inst);
+    }
     return result;
 }
 

@@ -3,6 +3,8 @@
 
 #include "trace_writer.h"
 
+#include "niobium/fhetch_writer.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -73,18 +75,32 @@ uint32_t TraceWriter::register_modulus(uint64_t modulus) {
     return idx;
 }
 
-void TraceWriter::emit(const std::string& instruction) {
+void TraceWriter::emit(const fhetch::Instruction& instruction) {
     std::scoped_lock lock(mutex_);
-    if (recording_ && !paused_) {
-        instructions_.push_back(instruction);
+    if (!recording_ || paused_) return;
+
+    // Reject rather than truncate: a narrowed address is a different but
+    // perfectly valid address, so truncating would corrupt the program instead
+    // of failing it. The reader refuses the same case.
+    const uint64_t widest = std::max({static_cast<uint64_t>(instruction.dest),
+                                      static_cast<uint64_t>(instruction.src1),
+                                      static_cast<uint64_t>(instruction.src2)});
+    if (widest > fhetch::kMaxAddress) {
+        const char* m = fhetch::fh_opcode_mnemonic(instruction.opcode);
+        std::cerr << "[FHETCH] WARNING: dropping " << (m ? m : "instruction")
+                  << ": address " << widest << " exceeds the "
+                  << fhetch::kMaxAddress << " an instruction can hold"
+                  << std::endl;
+        return;
     }
+    instructions_.push_back(instruction);
 }
 
 
 void TraceWriter::comment(const std::string& text) {
     std::scoped_lock lock(mutex_);
     if (recording_ && !paused_) {
-        instructions_.push_back("# " + text);
+        annotations_.push_back({0, text, instructions_.size()});
     }
 }
 
@@ -114,25 +130,13 @@ void TraceWriter::normalize_modulus_table_locked() {
     for (uint64_t q : regular) modulus_table_.push_back(q);
     modulus_index_ = std::move(new_index);
 
-    // Remap every "m=N" token inside the recorded instruction strings.
+    // Remap each instruction's modulus index. A literal modulus is a prime,
+    // not an index, so it is left alone. This used to rewrite "m=N" digits
+    // inside formatted strings, which meant scanning comment text too.
     for (auto& inst : instructions_) {
-        size_t pos = 0;
-        while ((pos = inst.find("m=", pos)) != std::string::npos) {
-            size_t start = pos + 2;
-            size_t end = start;
-            while (end < inst.size() && std::isdigit(static_cast<unsigned char>(inst[end])))
-                ++end;
-            if (end > start) {
-                uint32_t old = static_cast<uint32_t>(std::stoul(inst.substr(start, end - start)));
-                if (old < remap.size()) {
-                    std::string repl = std::to_string(remap[old]);
-                    inst.replace(start, end - start, repl);
-                    pos = start + repl.size();
-                    continue;
-                }
-            }
-            pos = end;
-        }
+        if (!inst.modulus.has_value() || inst.modulus_is_literal) continue;
+        const uint64_t old_index = *inst.modulus;
+        if (old_index < remap.size()) inst.modulus = remap[old_index];
     }
 }
 
@@ -150,44 +154,35 @@ std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
         return {};
     }
 
-    // Header
-    out << "# =========================================\n";
-    out << "# Niobium FHETCH Trace\n";
-    out << "# =========================================\n";
-    if (!program_name_.empty()) {
-        out << "# Program: " << program_name_;
-        if (!program_version_.empty()) out << " v" << program_version_;
-        out << "\n";
-    }
-    if (!program_description_.empty())
-        out << "# Description: " << program_description_ << "\n";
-    if (!source_file_.empty())
-        out << "# Source: " << source_file_ << ":" << source_line_ << "\n";
-    if (!build_timestamp_.empty())
-        out << "# Build: " << build_timestamp_ << "\n";
-    out << "# Instruction Count: " << instructions_.size() << "\n";
-    out << "# Modulus Count: " << modulus_table_.size() << "\n";
+    // Render through the shared writer, so this producer and every other
+    // spell a program the same way. The counts describe what is actually being
+    // written — which is why the instruction count is now the number of
+    // instructions rather than the number of lines.
+    fhetch::TraceMetadata metadata;
+    metadata.program_name = program_name_;
+    metadata.program_version = program_version_;
+    metadata.description = program_description_;
+    metadata.source_file = source_file_;
+    metadata.source_line = source_line_;
+    metadata.build_timestamp = build_timestamp_;
+    metadata.generated_timestamp = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
 
-    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    out << "# Generated: " << now << "\n";
-    out << "# =========================================\n";
-
-    // Modulus table
-    out << "\n# Modulus Table\n";
-    out << "modulus_count " << modulus_table_.size() << "\n";
-    for (size_t i = 0; i < modulus_table_.size(); ++i) {
-        out << "m[" << i << "] 0x" << std::hex << std::uppercase
-            << modulus_table_[i] << std::dec << "\n";
-    }
-
-    // Instructions
-    out << "\n# Instructions\n";
-    for (const auto& inst : instructions_) {
-        out << inst << "\n";
-    }
+    fhetch::Program program;
+    program.metadata = std::move(metadata);
+    program.modulus_table = modulus_table_;
+    program.instructions = instructions_;
+    program.annotations = annotations_;
 
     out.close();
+
+    if (!fhetch::write_fhetch_text(path, program)) {
+        std::cerr << "[FHETCH] ERROR: Cannot write trace to " << path << std::endl;
+        return {};
+    }
+
     std::cout << "[FHETCH] Trace written: " << path
               << " (" << instructions_.size() << " instructions, "
               << modulus_table_.size() << " moduli)" << std::endl;
@@ -197,6 +192,7 @@ std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
 void TraceWriter::clear() {
     std::scoped_lock lock(mutex_);
     instructions_.clear();
+    annotations_.clear();
     modulus_table_.clear();
     modulus_index_.clear();
     modulus_table_.push_back(COPY_MODULUS_VALUE);

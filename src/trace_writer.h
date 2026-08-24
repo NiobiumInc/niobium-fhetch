@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "niobium/fhetch_ir.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
@@ -29,6 +31,7 @@ public:
     void set_source_info(const std::string& file, int line,
                          const std::string& timestamp);
 
+
     bool is_recording() const { return recording_; }
     void start_recording();
     void stop_recording();
@@ -40,10 +43,18 @@ public:
     // Thread-safe.
     uint32_t register_modulus(uint64_t modulus);
 
-    // Emit a FHETCH instruction line into the trace.
-    void emit(const std::string& instruction);
+    // Record a FHETCH instruction.
+    //
+    // Addresses are narrowed to the IR's 32 bits here. An address too wide is
+    // dropped with a warning rather than truncated into a different, valid
+    // address — the reader takes the same posture. Nothing observed has ever
+    // come close: the widest address in a real client trace is ~200k against a
+    // 4.29-billion ceiling.
+    void emit(const fhetch::Instruction& instruction);
 
-    // Emit a comment line (prefixed with #).
+    // Record a comment. Comments are annotations, never instructions, and
+    // carry the number of instructions that precede them so the writer can put
+    // them back where they were — recorded traces interleave them heavily.
     void comment(const std::string& text);
 
     // Write the accumulated trace to a .fhetch file.
@@ -55,7 +66,9 @@ public:
     void clear();
 
     // Sort regular moduli ascending (sentinel stays at index 0) and remap
-    // every "m=N" token in recorded instruction strings accordingly.
+    // every instruction's modulus index accordingly. A field remap now: this
+    // used to rewrite "m=N" digits inside formatted strings, which also meant
+    // scanning comment text for something that looked like a modulus.
     // Called automatically from write(); exposed for tests.
     void normalize_modulus_table();
 
@@ -81,7 +94,8 @@ private:
     std::string source_file_;
     int source_line_ = 0;
     std::string build_timestamp_;
-    std::vector<std::string> instructions_;
+    std::vector<fhetch::Instruction> instructions_;
+    std::vector<fhetch::Annotation> annotations_;
 
     // Modulus table: modulus value → index
     std::vector<uint64_t> modulus_table_;

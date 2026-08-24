@@ -340,7 +340,7 @@ bool Compiler::stop() {
     // captured_outputs so write_replay_json picks them up. No-op for the
     // OpenFHE auto-facade flow (it populates captured_outputs directly).
     niobium::detail::sync_fhetch_state_to_compiler();
-    impl_->trace_writer.emit("halt");
+    impl_->trace_writer.emit(fhetch::Instruction{fhetch::FH_HALT});
     impl_->trace_writer.stop_recording();
     impl_->running = false;
     impl_->stopped = true;
@@ -710,7 +710,7 @@ bool Compiler::stop_epoch() {
     if (!impl_->running) return false;
 
     // Finalize the current epoch's trace
-    impl_->trace_writer.emit("halt");
+    impl_->trace_writer.emit(fhetch::Instruction{fhetch::FH_HALT});
     impl_->trace_writer.stop_recording();
 
     auto epoch_dir = get_program_directory() / ("epoch_" + std::to_string(impl_->epoch_id));
