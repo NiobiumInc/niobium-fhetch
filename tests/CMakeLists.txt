@@ -76,3 +76,10 @@ set_openfhe_rpath(automorph_alias_test)
 add_executable(simulator_liveness simulator_liveness/test.cpp)
 target_link_libraries(simulator_liveness PRIVATE niobium_fhetch)
 set_openfhe_rpath(simulator_liveness)
+
+# ==============================================================================
+# FHETCH IR — opcode vocabulary + instruction. Header-only, no OpenFHE.
+# ==============================================================================
+
+add_executable(fhetch_ir_test fhetch_ir/test.cpp)
+target_link_libraries(fhetch_ir_test PRIVATE niobium_fhetch)
