@@ -685,7 +685,6 @@ std::vector<uint64_t> Simulator::get_read_before_write_addresses() const {
         auto u = Impl::classify_uses(inst);
         for (int i = 0; i < u.n_reads; ++i) {
             uint64_t a = u.reads[i];
-            if (!a) continue;
             if (written.insert(a).second)
                 rbw.push_back(a);
         }
@@ -715,7 +714,6 @@ void Simulator::compute_liveness() {
         auto u = Impl::classify_uses(insts[i]);
         for (int j = 0; j < u.n_reads; ++j) {
             uint64_t a = u.reads[j];
-            if (a == 0) continue;
             if (impl_->live_out_.count(a) != 0U) continue;
             last_use[a] = i;
         }
