@@ -75,6 +75,7 @@ set_openfhe_rpath(automorph_alias_test)
 
 add_executable(simulator_liveness simulator_liveness/test.cpp)
 target_link_libraries(simulator_liveness PRIVATE niobium_fhetch)
+target_include_directories(simulator_liveness PRIVATE "${CMAKE_SOURCE_DIR}/src")
 set_openfhe_rpath(simulator_liveness)
 
 # ==============================================================================

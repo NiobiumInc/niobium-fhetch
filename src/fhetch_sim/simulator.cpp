@@ -730,7 +730,7 @@ void Simulator::compute_liveness() {
     // reserve_dest if a later write reuses it, then re-freed the same way.
     for (size_t i = 0; i < insts.size(); ++i) {
         auto u = Impl::classify_uses(insts[i]);
-        if (!u.writes || u.write == 0) continue;
+        if (!u.writes) continue;
         if (impl_->live_out_.count(u.write) != 0U) continue;
         auto it = last_use.find(u.write);
         if (it == last_use.end() || it->second < i)

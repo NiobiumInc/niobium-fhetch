@@ -7,6 +7,7 @@
 // addresses pinned. Near-SSA traces retain every dead result buffer
 // without the dead-write pass, so this is load-bearing for memory use.
 
+#include "local_replay.h"
 #include "niobium/fhetch_sim/simulator.h"
 
 #include <algorithm>
@@ -46,6 +47,77 @@ bool freed_anywhere(const std::vector<std::vector<uint64_t>>& sched, uint64_t ad
     for (const auto& v : sched)
         if (std::find(v.begin(), v.end(), addr) != v.end()) return true;
     return false;
+}
+
+// Address 0 is a legal dest (COPY_MODULUS is a *modulus-table* index, not an
+// address), so it must also be a legal live-in; pins the classify_uses fix.
+void test_addr_zero_live_in() {
+    const std::string trace =
+        "modulus_count 2\n"
+        "m[0] 0xFFFFFFFFFFFFFFFF\n"
+        "m[1] 0x11\n"
+        "# Instructions\n"
+        "sr_addp %2, %0, %1, m=1\n"
+        "halt\n";
+    auto trace_path = std::filesystem::temp_directory_path() /
+                      ("liveness_addr0_test_" + std::to_string(getpid()) + ".fhetch");
+    {
+        std::ofstream f(trace_path);
+        f << trace;
+    }
+
+    Simulator sim;
+    sim.set_ring_dimension(kRingDim);
+    if (!sim.load_trace(trace_path)) {
+        std::cerr << "FAIL: addr-zero trace failed to load" << std::endl;
+        ++g_failures;
+        std::filesystem::remove(trace_path);
+        return;
+    }
+
+    auto rbw = sim.get_read_before_write_addresses();
+    std::sort(rbw.begin(), rbw.end());
+    expect(rbw == std::vector<uint64_t>({0, 1}), "address 0 is a genuine live-in");
+
+    sim.store_polynomial(0, {1, 2, 3, 4}, kQ);
+    sim.store_polynomial(1, {5, 6, 7, 8}, kQ);
+    auto result = sim.run();
+    expect(result.errors == 0, "addr-zero live-in run completes without errors");
+    expect(sim.get_polynomial(2) == std::vector<uint64_t>({6, 8, 10, 12}),
+           "addr-zero live-in produces the correct sum");
+
+    std::filesystem::remove(trace_path);
+}
+
+// An under-supplied live-in must fail the replay rather than let the
+// simulator run over whatever happened to be resident (zero-filled) memory.
+void test_missing_live_in_fails_replay() {
+    auto dir = std::filesystem::temp_directory_path() /
+              ("liveness_missing_input_test_" + std::to_string(getpid()));
+    std::filesystem::create_directory(dir);
+
+    const std::string trace_file = "replay_missing.fhetch";
+    {
+        std::ofstream f(dir / trace_file);
+        f << "modulus_count 2\n"
+             "m[0] 0xFFFFFFFFFFFFFFFF\n"
+             "m[1] 0x11\n"
+             "# Instructions\n"
+             "sr_addp %2, %0, %1, m=1\n"
+             "halt\n";
+    }
+    {
+        std::ofstream f(dir / "fhetch_replay.json");
+        f << "{\"crypto_context\": {\"ring_dimension\": " << kRingDim << "}, "
+             "\"files\": {\"instructions\": \""
+          << trace_file << "\"}}";
+    }
+    // No <prog>.inputs.json: %0 and %1 are live-in but never supplied.
+
+    expect(!niobium::run_local_replay_from_project(dir),
+           "replay of a project with an unsupplied live-in fails");
+
+    std::filesystem::remove_all(dir);
 }
 
 }  // namespace
@@ -123,6 +195,9 @@ int main() {
                "%" + std::to_string(a) + " freed by end of run");
 
     std::filesystem::remove(trace_path);
+
+    test_addr_zero_live_in();
+    test_missing_live_in_fails_replay();
 
     if (g_failures) {
         std::cerr << g_failures << " liveness test failure(s)" << std::endl;
