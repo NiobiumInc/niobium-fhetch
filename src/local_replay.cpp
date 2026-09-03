@@ -17,6 +17,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -294,6 +295,7 @@ bool read_project_index(const fs::path& dir, ProjectIndex& out) {
 bool populate_inputs(const fs::path& dir, const std::string& prog, fhetch_sim::Simulator& sim) {
     auto rbw = sim.get_read_before_write_addresses();
     std::unordered_set<uint64_t> live_in(rbw.begin(), rbw.end());
+    std::unordered_set<uint64_t> stored_addrs;
 
     size_t stored = 0;
     size_t dropped = 0;
@@ -301,6 +303,7 @@ bool populate_inputs(const fs::path& dir, const std::string& prog, fhetch_sim::S
                                 uint64_t modulus) {
         if (live_in.count(addr) != 0U) {
             sim.store_polynomial(addr, std::move(values), modulus);
+            stored_addrs.insert(addr);
             ++stored;
         } else {
             ++dropped;
@@ -312,6 +315,17 @@ bool populate_inputs(const fs::path& dir, const std::string& prog, fhetch_sim::S
     }
     if (!fhetch::load_source_keys(dir, prog, sink)) {
         std::cerr << "[fhetch_sim] failed to load keys for " << prog << std::endl;
+        return false;
+    }
+    // An under-supplied live-in must fail here, not silently zero-fill in the simulator.
+    if (stored_addrs.size() != live_in.size()) {
+        std::vector<uint64_t> missing;
+        for (uint64_t addr : live_in)
+            if (stored_addrs.count(addr) == 0U) missing.push_back(addr);
+        std::sort(missing.begin(), missing.end());
+        std::cerr << "[fhetch_sim] missing live-in input(s) for " << prog << ":";
+        for (uint64_t addr : missing) std::cerr << " " << addr;
+        std::cerr << std::endl;
         return false;
     }
     std::cout << "[fhetch_sim] inputs: " << stored << " live-in polys stored, "
