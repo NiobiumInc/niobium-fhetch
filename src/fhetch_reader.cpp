@@ -395,20 +395,36 @@ private:
             return true;
         }
 
-        case OperandForm::AutomorphCoeff: {
-            if (!need(4) || !dest_src1()) return false;
-            uint64_t k = 0;
-            if (!to_named(args[2], "k=", k)) { warn("expected k="); return false; }
-            inst.k = k;
-            return modulus(args[3], inst);
-        }
-
+        // The two coeff forms take their index by NAME, in any order
+        // relative to the modulus, exactly like AutomorphEval above. Reading
+        // them positionally is a bug with history: a parser that stripped the
+        // prefixes and took the columns in order grabbed the modulus as the
+        // index, produced an even automorphism, and the consumer rejected it.
+        // Producers happen to emit index-then-modulus today, so being strict
+        // here would have cost nothing until the day it cost a great deal.
+        case OperandForm::AutomorphCoeff:
         case OperandForm::RotAutomorphCoeff: {
             if (!need(4) || !dest_src1()) return false;
-            uint64_t off = 0;
-            if (!to_named(args[2], "offset=", off)) { warn("expected offset="); return false; }
-            inst.offset = off;
-            return modulus(args[3], inst);
+            const bool is_rot = (form == OperandForm::RotAutomorphCoeff);
+            const std::string_view index_name = is_rot ? "offset=" : "k=";
+            bool saw_index = false;
+            bool saw_mod = false;
+            for (size_t i = 2; i < args.size(); ++i) {
+                uint64_t v = 0;
+                if (to_named(args[i], index_name, v)) {
+                    if (is_rot) inst.offset = v; else inst.k = v;
+                    saw_index = true;
+                    continue;
+                }
+                if (modulus(args[i], inst)) { saw_mod = true; continue; }
+                if (!result_.errors.empty()) return false;  // modulus() errored
+            }
+            if (!saw_index) {
+                warn(std::string("expected ") + std::string(index_name));
+                return false;
+            }
+            if (!saw_mod) { warn("missing modulus"); return false; }
+            return true;
         }
         }
         return false;
