@@ -374,6 +374,53 @@ bool test_reads_either_serialization() {
     return g_checks_failed == before;
 }
 
+
+/// The two coeff forms take their index by NAME, so the modulus may precede
+/// it. Reading them positionally is a bug with history: a parser that took the
+/// columns in order grabbed the modulus as the automorphism index, produced an
+/// even index, and the consumer rejected it.
+bool test_coeff_index_is_read_by_name() {
+    std::cout << "\n[coeff index is read by name, in any order]" << std::endl;
+    const int before = g_checks_failed;
+
+    // Index first — what every current producer emits.
+    {
+        const auto r = read_fhetch_text(with_table(
+            "sr_automorph_coeff %3, %2, k=7, m=1\n"
+            "sr_rot_automorph_coeff %4, %3, offset=24, m=1\n"));
+        CHECK(r.ok);
+        CHECK(r.program.instructions.size() == 2);
+        CHECK(r.program.instructions[0].k == 7);
+        CHECK(r.program.instructions[0].modulus == 1);
+        CHECK(r.program.instructions[1].offset == 24);
+        CHECK(r.program.instructions[1].modulus == 1);
+    }
+
+    // Modulus first, with the eval form's extra named operands interleaved.
+    // The index must still be 7 and 24 — never the modulus column.
+    {
+        const auto r = read_fhetch_text(with_table(
+            "sr_automorph_coeff %3, %2, m=1, mask=2047, logn=11, k=7\n"
+            "sr_rot_automorph_coeff %4, %3, m=1, offset=24\n"));
+        CHECK(r.ok);
+        CHECK(r.program.instructions.size() == 2);
+        CHECK(r.program.instructions[0].k == 7);
+        CHECK(r.program.instructions[0].modulus == 1);
+        CHECK(r.program.instructions[1].offset == 24);
+        CHECK(r.program.instructions[1].modulus == 1);
+    }
+
+    // A missing index is still refused rather than defaulted.
+    {
+        const auto r = read_fhetch_text(with_table(
+            "sr_automorph_coeff %3, %2, m=1, mask=2047\n"));
+        CHECK(r.program.instructions.empty());
+        CHECK(!r.warnings.empty());
+    }
+
+    return g_checks_failed == before;
+}
+
 }  // namespace
 
 int main() {
@@ -393,6 +440,7 @@ int main() {
     if (test_header_and_comments()) passed++; else failed++;
     if (test_addresses_are_not_ssa()) passed++; else failed++;
     if (test_reads_either_serialization()) passed++; else failed++;
+    if (test_coeff_index_is_read_by_name()) passed++; else failed++;
 
     std::cout << "\n========================================" << std::endl;
     std::cout << "Results: " << passed << " passed, " << failed << " failed"
