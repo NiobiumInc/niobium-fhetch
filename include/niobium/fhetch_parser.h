@@ -50,10 +50,14 @@ namespace niobium::fhetch {
 
 /// Statistics / diagnostics returned by parse_and_drive().
 struct DriveStats {
-    size_t instructions_parsed   = 0; ///< total instruction lines seen
-    size_t instructions_replayed = 0; ///< lines that successfully drove the API
-    size_t unknown_opcodes       = 0; ///< opcode strings the parser doesn't handle
-    size_t skipped_lines         = 0; ///< malformed lines (args missing, etc.)
+    size_t instructions_parsed   = 0; ///< instructions the reader recovered
+    size_t instructions_replayed = 0; ///< instructions that drove the API
+    /// Always 0. The shared reader reports diagnostics as text rather than as
+    /// kinds, so an unknown opcode is not distinguishable from any other
+    /// skipped line; both land in `skipped_lines`, and `errors` carries the
+    /// message that says which it was. Kept so callers still compile.
+    size_t unknown_opcodes       = 0;
+    size_t skipped_lines         = 0; ///< lines the reader or driver dropped
     std::vector<uint64_t> modulus_table;
     std::vector<std::string> errors;  ///< human-readable diagnostics
 
