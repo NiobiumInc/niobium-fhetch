@@ -231,6 +231,18 @@ test-fhetch-driver: build ## Re-drive a .fhetch trace (Debug). TRACE=<path> N=<r
 	fi
 	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N) --no-ring-dim-check
 
+test-fhetch-driver-binary-release: build-release ## Re-drive a binary .fhex trace (Release)
+	$(call set-build-config,Release,build)
+	@echo "[test-fhetch-driver-binary-release] recording a binary-only trace"
+	@rm -rf simple_fhetch_example_simple
+	@$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check --trace-format=binary
+	@FHEX=simple_fhetch_example_simple/simple_fhetch_example_simple.fhex; \
+	 if [ ! -f "$$FHEX" ]; then echo "  FAIL: no .fhex written"; exit 1; fi; \
+	 if [ -f simple_fhetch_example_simple/simple_fhetch_example_simple.fhetch ]; then \
+	     echo "  FAIL: a .fhetch was written in binary mode"; exit 1; fi; \
+	 echo "  driving $$FHEX"; \
+	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $$FHEX --ring-dim $(N) --no-ring-dim-check
+
 test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's trace
 	$(call set-build-config,Release,build)
 	@if [ -z "$(TRACE)" ]; then \
@@ -380,6 +392,7 @@ test-roundtrip-release: test-roundtrip-simple-ops-release test-roundtrip-bootstr
 test-release: \
     test-simple-fhetch-release \
     test-fhetch-driver-release \
+    test-fhetch-driver-binary-release \
     test-roundtrip-simple-ops-release \
     test-roundtrip-trace-format-release \
     test-roundtrip-plaintext-add-release  ## Run all currently-passing Release tests
