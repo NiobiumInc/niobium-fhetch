@@ -67,26 +67,76 @@ void extract_dcrt_towers(const DCRTPoly& dcrt,
     }
 }
 
-// .input_NAME.bin: uint32 instances; uint8 payload_type; uint32 num_polys;
-// DCRTPoly * num_polys.
+// .input_NAME.bin: uint32 instances, then per instance a uint8 payload_type
+// followed by a body whose framing depends on that type:
+//
+//   0 CIPHERTEXT        uint32 num_polys, DCRTPoly * num_polys
+//   1 PLAINTEXT         uint32 count (always 1), DCRTPoly
+//   2 DCRTPOLY_PROXY    uint32 count, uint8 format_flag,
+//                       then per element uint64 modulus + vector<uint64> values
+//   3 CIPHERTEXT_VECTOR uint32 vec_size, then vec_size CIPHERTEXT bodies
+//   4 PLAINTEXT_VECTOR  uint32 vec_size, then vec_size PLAINTEXT bodies
+//
+// The payload_type byte must be honoured, not skipped: the bodies are framed
+// differently, so guessing one shape for all of them silently mis-parses the
+// others (and just as bad, accepts a file whose tag and body disagree).
 bool load_input_bin(const fs::path& bin_path, const std::vector<uint64_t>& ids,
                     const niobium::fhetch::PolySink& sink) {
     std::ifstream f(bin_path, std::ios::binary);
     if (!f.is_open()) return false;
     try {
         cereal::PortableBinaryInputArchive ar(f);
-        uint32_t instances = 0;
-        uint8_t payload_type = 0;
-        uint32_t num_polys = 0;
-        ar(instances);
-        ar(payload_type);
-        ar(num_polys);
-
         auto id_it = ids.begin();
-        for (uint32_t i = 0; i < num_polys; ++i) {
-            DCRTPoly dcrt;
-            ar(dcrt);
-            extract_dcrt_towers(dcrt, id_it, ids.end(), sink);
+
+        auto read_dcrt_group = [&](uint32_t n) {
+            for (uint32_t i = 0; i < n; ++i) {
+                DCRTPoly dcrt;
+                ar(dcrt);
+                extract_dcrt_towers(dcrt, id_it, ids.end(), sink);
+            }
+        };
+
+        uint32_t instances = 0;
+        ar(instances);
+        for (uint32_t inst = 0; inst < instances; ++inst) {
+            uint8_t payload_type = 0;
+            ar(payload_type);
+
+            uint32_t count = 0;
+            ar(count);
+
+            switch (payload_type) {
+                case 0:  // CIPHERTEXT
+                case 1:  // PLAINTEXT
+                    read_dcrt_group(count);
+                    break;
+                case 2: {  // DCRTPOLY_PROXY
+                    uint8_t format_flag = 0;
+                    ar(format_flag);
+                    for (uint32_t e = 0; e < count; ++e) {
+                        uint64_t modulus = 0;
+                        std::vector<uint64_t> values;
+                        ar(modulus);
+                        ar(values);
+                        if (id_it == ids.end()) break;
+                        sink(*id_it++, std::move(values), modulus);
+                    }
+                    break;
+                }
+                case 3:    // CIPHERTEXT_VECTOR
+                case 4: {  // PLAINTEXT_VECTOR
+                    for (uint32_t v = 0; v < count; ++v) {
+                        uint32_t inner = 0;
+                        ar(inner);
+                        read_dcrt_group(inner);
+                    }
+                    break;
+                }
+                default:
+                    std::cerr << "[fhetch_sim] " << bin_path << ": unknown payload_type "
+                              << static_cast<int>(payload_type) << std::endl;
+                    return false;
+            }
         }
     } catch (const std::exception& e) {
         std::cerr << "[fhetch_sim] failed to read " << bin_path << ": " << e.what() << std::endl;
