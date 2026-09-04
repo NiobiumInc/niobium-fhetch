@@ -754,6 +754,11 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
     // addresses we'd map wouldn't match the poly_ids the subsequent
     // arithmetic probes (cv[i] *= *dcrt) actually use.
     std::vector<uint64_t> addr_ids;
+    // Per-tower payload for the DCRTPOLY_PROXY body written below, parallel to
+    // addr_ids. Collected here rather than re-derived from *dcrt at write time
+    // so that towers skipped above -- those with no FHETCH address -- are
+    // skipped on the wire too, keeping the two arrays the same length.
+    std::vector<std::pair<uint64_t, std::vector<uint64_t>>> proxy_elements;
     const auto& towers = dcrt->GetAllElements();
     size_t zero_count = 0;
     for (const auto & poly : towers) {
@@ -778,6 +783,8 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
         niobium::compiler().store_input_element(
             name, niobium::CapturedKind::SRP, /*starts_new_element=*/false, fhetch_addr, modulus,
             vals);
+
+        proxy_elements.emplace_back(modulus, std::move(vals));
     }
 
     if (capture_debug_enabled()) {
@@ -800,8 +807,17 @@ void save_dcrt_poly_as_input(const void* dcrt_poly_ptr) {
     cereal::PortableBinaryOutputArchive ar(bin_stream);
     ar(static_cast<uint32_t>(1));   // instances_count
     ar(static_cast<uint8_t>(2));    // payload_type: DCRTPOLY_PROXY
-    ar(static_cast<uint32_t>(1));   // elements_count
-    ar(*dcrt);
+    // DCRTPOLY_PROXY body: uint32 element count, uint8 format flag
+    // (1 = EVALUATION, 0 = COEFFICIENT), then per element a uint64 modulus
+    // followed by the coefficient vector. Note this is NOT the PLAINTEXT body
+    // (uint32 count + a serialized DCRTPoly) -- the two payload types are
+    // framed differently and are not interchangeable.
+    ar(static_cast<uint32_t>(proxy_elements.size()));
+    ar(static_cast<uint8_t>(dcrt->GetFormat() == Format::EVALUATION ? 1 : 0));
+    for (const auto& [modulus, values] : proxy_elements) {
+        ar(modulus);
+        ar(values);
+    }
 }
 }  // namespace niobium::detail
 

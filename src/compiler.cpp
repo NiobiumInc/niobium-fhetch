@@ -1443,6 +1443,10 @@ void Compiler::write_replay_json() {
     // cereal_binary key reader consume this format.
     replay["evalmult_format"] = "cereal_binary";
     replay["evalautomorphism_format"] = "cereal_binary";
+    // Declares the framing of the .bp.bin written by tag_bootstrap_precompute.
+    // Readers select their parser from this field, so it must be present
+    // whenever files["bootstrap_precomp"] is set.
+    replay["bootstrap_precomp_format"] = "cereal_binary";
     // Client recordings are always ordinary-form (standard residues, natural
     // order, ordinary immediates); this flag describes the recording, not the
     // replay target. Hardware-izing (input data, immediates, switchmodulus
