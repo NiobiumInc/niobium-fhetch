@@ -2,7 +2,7 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 ============================================================
 
 Project: niobium-fhetch
-Generated: 2026-09-05
+Generated: 2026-09-06
 Tool: SCANOSS (snippet detection with License dataset)
 Components: 83
 
@@ -1011,7 +1011,7 @@ COMPONENT ATTRIBUTIONS
 
   Otus_IP_filter
   Version: 3
-  Source: https://github.com/Daniil199820/Otus_IP_filter
+  Source: https://github.com/daniil199820/otus_ip_filter
   PURL: pkg:github/daniil199820/otus_ip_filter
   Copyright:
     Copyright 2009 Google Inc. All rights reserved
