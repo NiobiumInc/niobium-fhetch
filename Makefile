@@ -25,11 +25,9 @@ SHELL := /bin/bash
 UNAME_S := $(shell uname -s)
 
 ifndef NUM_CPUS
-  ifeq ($(UNAME_S), Darwin)
-    NUM_CPUS := $(shell sysctl -n hw.ncpu)
-  else
-    NUM_CPUS := $(shell nproc)
-  endif
+  # nproc first: it alone honours the CPU affinity mask. getconf covers macOS,
+  # where nproc is absent; the literal is what keeps an empty value impossible.
+  NUM_CPUS := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 endif
 
 # ==============================================================================
