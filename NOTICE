@@ -2,9 +2,9 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 ============================================================
 
 Project: niobium-fhetch
-Generated: 2026-09-24
+Generated: 2026-09-25
 Tool: SCANOSS (snippet detection with License dataset)
-Components: 127
+Components: 136
 
 This file lists all third-party software components detected
 in this repository, along with their licenses and copyright
@@ -26,27 +26,28 @@ LICENSE SUMMARY
   AFL-2.1: 1 component(s)
   AFL-3.0 AND GPL-2.0-only AND AFL-2.1 AND GPL-2.0-or-later AND MIT AND GPL-1.0-or-later: 1 component(s)
   AGPL-3.0-only [COPYLEFT]: 1 component(s)
-  Apache-2.0: 25 component(s)
+  Apache-2.0: 29 component(s)
   Apache-2.0 AND Apache-2.0 AND OpenSSL: 1 component(s)
-  Apache-2.0 WITH LLVM-exception: 3 component(s)
+  Apache-2.0 WITH LLVM-exception: 4 component(s)
   Apache-2.0 WITH LLVM-exception AND NCSA: 2 component(s)
   Apache-2.0 WITH LLVM-exception AND NCSA AND NCSA OR MIT AND NCSA AND MIT: 1 component(s)
   Apache-with-LLVM-Exception: 1 component(s)
-  Artistic-1.0-Perl: 1 component(s)
+  Artistic-1.0-Perl: 2 component(s)
   Artistic-1.0-Perl OR GPL-1.0-or-later: 1 component(s)
   Artistic-2.0: 1 component(s)
-  BSD-2-Clause: 12 component(s)
+  BSD-2-Clause: 13 component(s)
   BSD-2-Clause AND BSD-3-Clause: 1 component(s)
   BSD-2-Clause AND LGPL-2.1-only: 1 component(s)
   BSD-2-Clause-Darwin: 1 component(s)
   BSD-2-Clause-Patent: 1 component(s)
-  BSD-3-Clause: 45 component(s)
+  BSD-2-Clause-Views: 1 component(s)
+  BSD-3-Clause: 47 component(s)
   BSD-3-Clause AND GPL-2.0-only AND BSD-3-Clause OR GPL-2.0-or-later AND GPL-1.0-or-later: 1 component(s)
   BSD-3-Clause AND ISC AND ISC AND MIT AND MIT: 1 component(s)
   BSD-3-Clause-LBNL: 1 component(s)
   BSD-4-Clause-UC: 1 component(s)
   BSD-Attribution-HPND-disclaimer: 1 component(s)
-  BSL-1.0: 2 component(s)
+  BSL-1.0: 3 component(s)
   CC-BY-1.0: 1 component(s)
   CC-BY-2.0: 1 component(s)
   CC-BY-2.5: 1 component(s)
@@ -80,7 +81,7 @@ LICENSE SUMMARY
   CC-BY-SA-3.0-AT: 1 component(s)
   CC-BY-SA-4.0: 1 component(s)
   CC-PDDC: 1 component(s)
-  CC0-1.0: 2 component(s)
+  CC0-1.0: 3 component(s)
   CC0-1.0 OR Apache-2.0 AND CC0-1.0 AND Apache-2.0 AND CC0-1.0 AND Apache-2.0: 1 component(s)
   CDDL-1.0 [COPYLEFT]: 1 component(s)
   CDDL-1.1 [COPYLEFT]: 1 component(s)
@@ -98,14 +99,15 @@ LICENSE SUMMARY
   GPL-1.0-or-later AND CC-BY-4.0: 1 component(s)
   GPL-1.0-or-later AND GPL-2.0-or-later AND GPL-2.0-only: 1 component(s)
   GPL-1.0-or-later AND GPL-3.0-only AND MIT: 1 component(s)
-  GPL-2.0-only [COPYLEFT]: 7 component(s)
+  GPL-2.0-only [COPYLEFT]: 8 component(s)
   GPL-2.0-only AND GPL-3.0-only AND GPL-1.0-or-later AND GPL-1.0-or-later AND GPL-2.0-only: 1 component(s)
   GPL-2.0-or-later [COPYLEFT]: 2 component(s)
   GPL-3.0-linking-exception: 1 component(s)
   GPL-3.0-linking-source-exception: 1 component(s)
-  GPL-3.0-only [COPYLEFT]: 8 component(s)
+  GPL-3.0-only [COPYLEFT]: 9 component(s)
   GPL-3.0-only AND BSD-3-Clause AND GPL-1.0-or-later AND GPL-2.0-only: 1 component(s)
   GPL-3.0-only AND GPL-1.0-or-later AND BSD-3-Clause: 1 component(s)
+  GPL-3.0-or-later [COPYLEFT]: 1 component(s)
   GPL-3.0-or-later AND FSFAP: 1 component(s)
   GPL-CC-1.0: 1 component(s)
   HPND: 1 component(s)
@@ -115,12 +117,12 @@ LICENSE SUMMARY
   HPND-sell-variant: 1 component(s)
   HPND-sell-variant AND MIT: 1 component(s)
   ICU: 1 component(s)
-  ISC: 2 component(s)
+  ISC: 3 component(s)
   ISC AND BSD-Source-Code AND BSD-3-Clause AND BSD-2-Clause AND Zlib: 1 component(s)
   Jam: 1 component(s)
   LGPL-2.0-only [COPYLEFT]: 1 component(s)
   LGPL-2.0-or-later AND LGPL-2.1-or-later: 1 component(s)
-  LGPL-2.1-only [COPYLEFT]: 3 component(s)
+  LGPL-2.1-only [COPYLEFT]: 4 component(s)
   LGPL-2.1-only AND GPL-1.0-or-later AND LGPL-2.1-or-later: 1 component(s)
   LGPL-2.1-only AND GPL-2.0-only AND GPL-2.0-only: 1 component(s)
   LGPL-2.1-only AND GPL-2.0-only AND LGPL-2.1-only: 1 component(s)
@@ -140,7 +142,7 @@ LICENSE SUMMARY
   LPPL-1.3c: 1 component(s)
   Libpng: 1 component(s)
   Linux-syscall-note: 1 component(s)
-  MIT: 46 component(s)
+  MIT: 50 component(s)
   MIT AND Apache-2.0: 1 component(s)
   MIT AND GPL-2.0-only AND GPL-1.0-or-later AND MIT AND GPL-1.0-or-later AND MIT AND Boehm-GC AND GPL-1.0-or-later: 1 component(s)
   MIT AND GPL-3.0-only: 1 component(s)
@@ -155,9 +157,9 @@ LICENSE SUMMARY
   MIT-open-group AND X11: 1 component(s)
   MPL-1.0: 1 component(s)
   MPL-1.1 [COPYLEFT]: 1 component(s)
-  MPL-2.0 [COPYLEFT]: 4 component(s)
+  MPL-2.0 [COPYLEFT]: 6 component(s)
   MPL-2.0 AND Apache-2.0: 1 component(s)
-  NCSA: 4 component(s)
+  NCSA: 7 component(s)
   OFL-1.1 [COPYLEFT]: 1 component(s)
   OFL-1.1 AND Apache-2.0: 1 component(s)
   OLDAP-2.8: 1 component(s)
@@ -171,7 +173,7 @@ LICENSE SUMMARY
   Swift-exception AND u-boot-exception-2.0 AND WxWindows-exception-3.1: 1 component(s)
   TU-Berlin-2.0: 1 component(s)
   UNKNOWN: 5 component(s)
-  Unlicense: 2 component(s)
+  Unlicense: 3 component(s)
   W3C: 1 component(s)
   WTFPL: 1 component(s)
   X11: 1 component(s)
@@ -331,6 +333,12 @@ COMPONENT ATTRIBUTIONS
     Copyright (c) 2018; Shane Grant
   License: BSD-3-Clause
 
+  checkedc-llvm-project
+  Version: llvmorg-3.8.0-rc1
+  Source: https://github.com/secure-sw-dev/checkedc-llvm-project
+  PURL: pkg:github/secure-sw-dev/checkedc-llvm-project
+  License: Apache-2.0, CC0-1.0, MIT, NCSA
+
   checkers_game_qt_cplusplus
   Version: v2.0
   Source: https://github.com/adamchor1992/checkers_game_qt_cplusplus
@@ -397,6 +405,12 @@ COMPONENT ATTRIBUTIONS
     Copyright 2020 Google Inc. All rights reserved.
     Copyright 2021 Google Inc.
   License: MIT
+
+  como
+  Version: 536c41a
+  Source: https://gitee.com/tjopenlab/como
+  PURL: pkg:gitee/tjopenlab/como
+  License: Apache-2.0
 
   conan-googletest
   Version: 1.9.0-b3
@@ -483,6 +497,14 @@ COMPONENT ATTRIBUTIONS
   Copyright:
     Copyright (c) 2016-2021 Viktor Kirilov
   License: MIT
+
+  dxfeed-graal-cxx-api
+  Version: v4.2.0
+  Source: https://github.com/dxFeed/dxfeed-graal-cxx-api
+  PURL: pkg:github/dxfeed/dxfeed-graal-cxx-api
+  Copyright:
+    Copyright (c) 2016-2023 Viktor Kirilov
+  License: MPL-2.0
 
   dxfeed-graal-cxx-api-samples
   Version: v0.0.0-alpha
@@ -620,7 +642,9 @@ COMPONENT ATTRIBUTIONS
   Source: https://github.com/sh1ne-dev/geometrize2gd
   PURL: pkg:github/sh1ne-dev/geometrize2gd
   Copyright:
+    Copyright 2008-2009 Bjorn Hoehrmann <bjoern@hoehrmann.de>
     Copyright 2013-2023 Niels Lohmann <https:  nlohmann.me>
+    CopyrightText: 2008-2009 Bj  rn Hoehrmann <bjoern@hoehrmann.de>
     CopyrightText: 2013-2023 Niels Lohmann <https:  nlohmann.me>
   License: MIT
 
@@ -665,6 +689,14 @@ COMPONENT ATTRIBUTIONS
   Copyright:
     Copyright 2024 Google Inc
   License: Apache-2.0, BSD-3-Clause, MIT
+
+  github.com/emscripten-core/emscripten-fastcomp
+  Version: v0.0.0-20170725214447-6aae5ce677d7
+  Source: https://proxy.golang.org/github.com/emscripten-core/emscripten-fastcomp/@v/v0.0.0-20170725214447-6aae5ce677d7.zip
+  PURL: pkg:golang/github.com/emscripten-core/emscripten-fastcomp
+  Copyright:
+    Copyright 2003-2017 University of Illinois at Urbana-Champaign
+  License: BSD-3-Clause, MIT
 
   github.com/google/googletest
   Version: v1.14.1-0.20250210182227-4a00a24fff3c
@@ -779,6 +811,10 @@ COMPONENT ATTRIBUTIONS
   PURL: pkg:golang/github.com/openfheorg/openfhe-development
   Copyright:
     Copyright (c) 2014-2022; NJIT; Duality Technologies Inc. and other contributors
+    Copyright 2012; Samuel Neves <sneves@dei.uc.pt>
+    Copyright 2012; Samuel Neves <sneves@dei.uc.pt>.  You may use this under the
+    Copyright 2016; JP Aumasson <jeanphilippe.aumasson@gmail.com>
+    Copyright 2016; Samuel Neves <sneves@dei.uc.pt>
   License: BSD-2-Clause
 
   github.com/pmp-library/pmp-library
@@ -790,6 +826,12 @@ COMPONENT ATTRIBUTIONS
     Copyright 2006; Google Inc.
     Copyright 2009 Google Inc.
   License: BSD-3-Clause, GPL-2.0-only, MIT, MPL-2.0, Zlib
+
+  github.com/servo/mozjs
+  Version: v0.61.1
+  Source: https://proxy.golang.org/github.com/servo/mozjs/@v/v0.61.1.zip
+  PURL: pkg:golang/github.com/servo/mozjs
+  License: Apache-2.0, Artistic-1.0-Perl, BSD-2-Clause, BSD-2-Clause-Views, BSD-3-Clause, BSL-1.0, GPL-2.0-only, GPL-3.0-only, GPL-3.0-or-later, ISC, LGPL-2.1-only, MIT, MPL-2.0, NCSA, Unlicense
 
   github.com/USCiLab/cereal
   Version: v1.3.3-0.20220327215417-ddd467244713
@@ -982,6 +1024,7 @@ COMPONENT ATTRIBUTIONS
   PURL: pkg:github/falcon-autotuning/instrument-controller
   Copyright:
     Copyright (C) 2004-2008 Ren   Nyffenegger
+    Copyright (C) 2006; 2009 Marcin Kalicinski
     Copyright (C) 2015 THL A29 Limited; a Tencent company; and Milo Yip. All rights reserved.
     Copyright (c) 2004-2008 Rene Nyffenegger
   License: MPL-2.0
@@ -1223,6 +1266,14 @@ COMPONENT ATTRIBUTIONS
     Copyright 2011-2016 by the contributors listed in CREDITS.TXT
   License: Apache-2.0, CC0-1.0, MIT, NCSA
 
+  llvmclang
+  Version: v5.0.0
+  Source: https://github.com/opencor/llvmclang
+  PURL: pkg:github/opencor/llvmclang
+  Copyright:
+    Copyright 2003-2017 University of Illinois at Urbana-Champaign
+  License: NCSA
+
   log
   Version: 16a57b3
   Source: https://gitee.com/for_ten_years/log
@@ -1251,6 +1302,14 @@ COMPONENT ATTRIBUTIONS
     Copyright 2022 evanwashere
   License: MIT
 
+  ml-llvm-project
+  Version: llvmorg-3.9.1-rc2
+  Source: https://github.com/iith-compilers/ml-llvm-project
+  PURL: pkg:github/iith-compilers/ml-llvm-project
+  Copyright:
+    (C); std::thread(C);
+  License: Apache-2.0 WITH LLVM-exception
+
   moonbit-overlay
   Version: v0.9.2+bbe2b338f+81d40e3
   Source: https://github.com/moonbit-community/moonbit-overlay
@@ -1277,6 +1336,14 @@ COMPONENT ATTRIBUTIONS
   Copyright:
     Copyright 2006; Google Inc.
   License: BSD-3-Clause
+
+  nlohmann_json
+  Version: v2.0.10
+  Source: https://gitee.com/minhanghuang/nlohmann_json
+  PURL: pkg:gitee/minhanghuang/nlohmann_json
+  Copyright:
+    Copyright 2013-2017 Niels Lohmann
+  License: MIT
 
   ntgcalls
   Version: 1.2.1
@@ -1343,6 +1410,7 @@ COMPONENT ATTRIBUTIONS
     Copyright  c) 2014-2022  NJIT  Duality Technologies Inc. and other contributors
     Copyright (c) 2014-2022; NJIT; Duality Technologies Inc. and other contributors
     Copyright (c) 2014-2023; NJIT; Duality Technologies Inc. and other contributors
+    Copyright (c) 2014-2024; NJIT; Duality Technologies Inc. and other contributors
   License: BSD-2-Clause
 
   OpenXLSX
@@ -1562,6 +1630,14 @@ COMPONENT ATTRIBUTIONS
     Copyright (c) 2018 Pranav Srinivas Kumar <pranav.srinivas.kumar@gmail.com>
     Copyright 2008; Google Inc.
   License: MIT
+
+  swift-llvm
+  Version: swift-3.1-DEVELOPMENT-SNAPSHOT-2017-02-17-a
+  Source: https://github.com/apple/swift-llvm
+  PURL: pkg:github/apple/swift-llvm
+  Copyright:
+    Copyright 2003-2016 University of Illinois at Urbana-Champaign
+  License: Apache-2.0
 
   Task_2
   Version: 3
@@ -10782,6 +10858,26 @@ this program; if not, write to the Free Software Foundation, Inc.,
 Full license text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
 
+--- NCSA ---
+
+University of Illinois/NCSA Open Source License
+
+Copyright (c) <Year> <Owner Organization Name>. All rights reserved.
+
+Developed by: <Name of Development Group> <Name of Institution> <URL for Development Group/Institution>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal with the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+     * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimers.
+
+     * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimers in the documentation and/or other materials provided with the distribution.
+
+     * Neither the names of <Name of Development Group, Name of Institution>, nor the names of its contributors may be used to endorse or promote products derived from this Software without specific prior written permission.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
+
+
+
 --- OpenSSL ---
 
 OpenSSL License
@@ -10835,29 +10931,51 @@ The licence and distribution terms for any publically available version or deriv
 
 
 
---- NCSA ---
-
-University of Illinois/NCSA Open Source License
-
-Copyright (c) <Year> <Owner Organization Name>. All rights reserved.
-
-Developed by: <Name of Development Group> <Name of Institution> <URL for Development Group/Institution>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal with the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-     * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimers.
-
-     * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimers in the documentation and/or other materials provided with the distribution.
-
-     * Neither the names of <Name of Development Group, Name of Institution>, nor the names of its contributors may be used to endorse or promote products derived from this Software without specific prior written permission.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
-
-
-
 --- UNKNOWN ---
 
 Full license text available at: https://spdx.org/licenses/UNKNOWN.html
+
+
+--- BSD-2-Clause-Views ---
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+--- GPL-3.0-or-later ---
+
+This library is free software; you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 3 of the License, or (at
+your option) any later version.
+
+This library is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with this library; if not, see <https://www.gnu.org/licenses/>.
+
+Full license text: https://www.gnu.org/licenses/lgpl-3.0.html
 
 
 --- BSD-3-Clause-LBNL ---
