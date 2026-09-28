@@ -395,6 +395,10 @@ test-roundtrip-plaintext-add-release: build-release ## Full roundtrip for plaint
 
 test-roundtrip-release: test-roundtrip-simple-ops-release test-roundtrip-bootstrap-release test-roundtrip-plaintext-add-release ## Full roundtrip sweep: simple_ops + bootstrap + plaintext-add
 
+test-ntt-omega-release: build-release ## Caller-chosen NTT roots: record, validate, serialize, re-drive, simulate (Release)
+	$(call set-build-config,Release,build)
+	$(BUILD_DIR)/tests/ntt_omega_test
+
 # ==============================================================================
 # test-release — everything that currently passes
 # ==============================================================================
@@ -409,7 +413,8 @@ test-release: \
     test-fhetch-driver-binary-release \
     test-roundtrip-simple-ops-release \
     test-roundtrip-trace-format-release \
-    test-roundtrip-plaintext-add-release  ## Run all currently-passing Release tests
+    test-roundtrip-plaintext-add-release \
+    test-ntt-omega-release  ## Run all currently-passing Release tests
 
 # Python bindings dev/smoke targets (config/build + roundtrip tests) live in
 # their own makefile, mirroring bindings/python/CMakeLists.txt. Shares this file's
