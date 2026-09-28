@@ -105,3 +105,13 @@ target_link_libraries(fhetch_reader_test PRIVATE niobium_fhetch)
 
 add_executable(fhetch_writer_test fhetch_writer/test.cpp)
 target_link_libraries(fhetch_writer_test PRIVATE niobium_fhetch)
+
+# ==============================================================================
+# Caller-chosen NTT roots: recording, validation, both serializations, the
+# parser's re-drive, and the simulator's transforms against OpenFHE's.
+# ==============================================================================
+
+add_executable(ntt_omega_test ntt_omega/test.cpp)
+target_link_libraries(ntt_omega_test PRIVATE niobium_fhetch)
+target_include_directories(ntt_omega_test PRIVATE "${CMAKE_SOURCE_DIR}/src")
+set_openfhe_rpath(ntt_omega_test)

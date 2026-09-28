@@ -242,9 +242,12 @@ struct Instruction {
     std::optional<uint64_t> modulus;
     bool modulus_is_literal = false;
 
-    /// Root of unity for sr_ntt / sr_intt. A Niobium extension: the
+    /// Root of unity for sr_ntt / sr_intt: the primitive 2N-th root psi the
+    /// forward transform evaluates at, in [1, q), which sr_intt carries too
+    /// (not its inverse). Absent, a consumer uses the minimal primitive 2N-th
+    /// root of unity mod the instruction's modulus. A Niobium extension: the
     /// specification defines the transforms abstractly and says nothing about
-    /// how omega is obtained. When present a consumer should prefer it over
+    /// how omega is obtained. When present a consumer uses it rather than
     /// deriving one, so dropping it changes results rather than saving space.
     std::optional<uint64_t> omega;
 

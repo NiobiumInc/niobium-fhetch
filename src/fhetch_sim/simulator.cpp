@@ -5,6 +5,7 @@
 // OpenFHE modular arithmetic.
 
 #include "niobium/fhetch_sim/simulator.h"
+#include "niobium/checks.h"
 #include "niobium/fhetch_reader.h"
 #include "memory.h"
 
@@ -18,6 +19,8 @@
 #include <iostream>
 #include <memory>
 #include <iterator>
+#include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -68,6 +71,77 @@ struct Simulator::Impl {
                         " is outside the table of " +
                         std::to_string(trace.modulus_table.size()) + " entries");
         return 0;
+    }
+
+    // Twiddle tables for one modulus and root at ring_dim, laid out for
+    // OpenFHE's NumberTheoreticTransformNat. The simulator keeps its own
+    // because ChineseRemainderTransformFTT caches tables per modulus alone,
+    // process-wide: once anything has transformed mod q it ignores the root
+    // it is handed for q, and whatever root the simulator used first is what
+    // every later caller in the process would get.
+    struct NttTables {
+        NativeVector forward;
+        NativeVector forward_precon;
+        NativeVector inverse;
+        NativeVector inverse_precon;
+        NativeInteger n_inverse;
+        NativeInteger n_inverse_precon;
+    };
+
+    // Keyed by (modulus, the trace's omega), so an instruction that records
+    // no root derives the minimal one once per modulus rather than once per
+    // transform. Built for ring_dim; set_ring_dimension() empties it.
+    std::map<std::pair<uint64_t, std::optional<uint64_t>>, NttTables> ntt_tables;
+
+    // psi^i at slot brv(i), and psi^-i likewise for the inverse: the layout
+    // ChineseRemainderTransformFTTNat::PreCompute builds.
+    NttTables build_ntt_tables(uint64_t q, uint64_t root) const {
+        const NativeInteger mod(q);
+        const NativeInteger mu = mod.ComputeMu();
+        const NativeInteger psi(root);
+        const NativeInteger psi_inverse = psi.ModInverse(mod);
+        const auto n = static_cast<uint32_t>(ring_dim);
+        const uint32_t log_n = GetMSB(n - 1);
+        NttTables t{NativeVector(n, mod), NativeVector(n, mod),
+                    NativeVector(n, mod), NativeVector(n, mod),
+                    NativeInteger(n).ModInverse(mod), NativeInteger()};
+        t.n_inverse_precon = t.n_inverse.PrepModMulConst(mod);
+        NativeInteger power(1);
+        NativeInteger inverse_power(1);
+        for (uint32_t i = 0; i < n; ++i) {
+            const uint32_t slot = ReverseBits(i, log_n);
+            t.forward[slot] = power;
+            t.forward_precon[slot] = power.PrepModMulConst(mod);
+            t.inverse[slot] = inverse_power;
+            t.inverse_precon[slot] = inverse_power.PrepModMulConst(mod);
+            power.ModMulEq(psi, mod, mu);
+            inverse_power.ModMulEq(psi_inverse, mod, mu);
+        }
+        return t;
+    }
+
+    // Tables for the root an sr_ntt / sr_intt runs with: the trace's omega,
+    // else the minimal primitive 2N-th root of unity mod q. nullptr, after
+    // reporting, when the trace's omega is not a primitive 2N-th root.
+    const NttTables* ntt_tables_for(const Instruction& inst, uint64_t q) {
+        const auto key = std::make_pair(q, inst.omega);
+        auto it = ntt_tables.find(key);
+        if (it != ntt_tables.end()) return &it->second;
+
+        uint64_t root = 0;
+        if (inst.omega.has_value()) {
+            root = *inst.omega;
+            if (!niobium::is_primitive_2n_root(root, ring_dim, q)) {
+                error(inst, "omega " + std::to_string(root) +
+                                " is not a primitive 2N-th root of unity mod " +
+                                std::to_string(q) + " for N = " +
+                                std::to_string(ring_dim));
+                return nullptr;
+            }
+        } else {
+            root = RootOfUnity<NativeInteger>(2 * ring_dim, NativeInteger(q)).ConvertToInt();
+        }
+        return &ntt_tables.emplace(key, build_ntt_tables(q, root)).first->second;
     }
 
     // Addresses we've already warned about once — keeps uninit-read
@@ -347,20 +421,14 @@ struct Simulator::Impl {
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
+        const NttTables* tables = ntt_tables_for(inst, q);
+        if (tables == nullptr) return false;
 
         NativeInteger mod(q);
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
-
-        // Use omega from trace if available, otherwise compute
-        NativeInteger root;
-        if (inst.omega.has_value() && inst.omega.value() != 0) {
-            root = NativeInteger(inst.omega.value());
-        } else {
-            root = RootOfUnity<NativeInteger>(2 * ring_dim, mod);
-        }
-        ChineseRemainderTransformFTT<NativeVector> transformer;
-        transformer.ForwardTransformToBitReverse(va, root, 2 * ring_dim, &va);
+        intnat::NumberTheoreticTransformNat<NativeVector>().ForwardTransformToBitReverseInPlace(
+            tables->forward, tables->forward_precon, &va);
 
         auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++) result[i] = va[i].ConvertToInt();
@@ -454,19 +522,15 @@ struct Simulator::Impl {
         std::vector<uint64_t> scratch;
         const auto& a = get_or_zero(inst.src1, scratch, inst);
         if (a.size() != ring_dim) { error(inst, "ring dimension mismatch"); return false; }
+        const NttTables* tables = ntt_tables_for(inst, q);
+        if (tables == nullptr) return false;
 
         NativeInteger mod(q);
         NativeVector va(ring_dim, mod);
         for (size_t i = 0; i < ring_dim; i++) va[i] = NativeInteger(a[i]);
-
-        NativeInteger root;
-        if (inst.omega.has_value() && inst.omega.value() != 0) {
-            root = NativeInteger(inst.omega.value());
-        } else {
-            root = RootOfUnity<NativeInteger>(2 * ring_dim, mod);
-        }
-        ChineseRemainderTransformFTT<NativeVector> transformer;
-        transformer.InverseTransformFromBitReverse(va, root, 2 * ring_dim, &va);
+        intnat::NumberTheoreticTransformNat<NativeVector>().InverseTransformFromBitReverseInPlace(
+            tables->inverse, tables->inverse_precon, tables->n_inverse,
+            tables->n_inverse_precon, &va);
 
         auto& result = memory.reserve_dest(inst.dest);
         for (size_t i = 0; i < ring_dim; i++) result[i] = va[i].ConvertToInt();
@@ -616,6 +680,7 @@ Simulator::~Simulator() = default;
 void Simulator::set_ring_dimension(uint64_t N) {
     impl_->ring_dim = N;
     impl_->memory.set_ring_dim(N);
+    impl_->ntt_tables.clear();
 }
 
 bool Simulator::load_trace(const std::filesystem::path& trace_file) {
