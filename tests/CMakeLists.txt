@@ -115,3 +115,12 @@ add_executable(ntt_omega_test ntt_omega/test.cpp)
 target_link_libraries(ntt_omega_test PRIVATE niobium_fhetch)
 target_include_directories(ntt_omega_test PRIVATE "${CMAKE_SOURCE_DIR}/src")
 set_openfhe_rpath(ntt_omega_test)
+
+# ==============================================================================
+# replay_project's --out scoping: nbcc_fhetch_replay's secondary output is
+# pinned inside the project directory instead of the spawned process's CWD.
+# ==============================================================================
+
+add_executable(replay_out_test replay_out/test.cpp)
+target_link_libraries(replay_out_test PRIVATE niobium_fhetch)
+set_openfhe_rpath(replay_out_test)

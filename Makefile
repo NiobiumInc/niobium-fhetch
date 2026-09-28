@@ -399,6 +399,10 @@ test-ntt-omega-release: build-release ## Caller-chosen NTT roots: record, valida
 	$(call set-build-config,Release,build)
 	$(BUILD_DIR)/tests/ntt_omega_test
 
+test-replay-out-release: build-release ## replay_project scopes nbcc_fhetch_replay's --out to the project dir (Release)
+	$(call set-build-config,Release,build)
+	$(BUILD_DIR)/tests/replay_out_test
+
 # ==============================================================================
 # test-release — everything that currently passes
 # ==============================================================================
@@ -414,7 +418,8 @@ test-release: \
     test-roundtrip-simple-ops-release \
     test-roundtrip-trace-format-release \
     test-roundtrip-plaintext-add-release \
-    test-ntt-omega-release  ## Run all currently-passing Release tests
+    test-ntt-omega-release \
+    test-replay-out-release  ## Run all currently-passing Release tests
 
 # Python bindings dev/smoke targets (config/build + roundtrip tests) live in
 # their own makefile, mirroring bindings/python/CMakeLists.txt. Shares this file's
