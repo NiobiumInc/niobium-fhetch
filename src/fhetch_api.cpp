@@ -8,6 +8,7 @@
 // trace and lowers it to internal hardware instructions.
 
 #include "niobium/fhetch_api.h"
+#include "niobium/checks.h"
 #include "niobium/compiler.h"
 #include "compiler_internal.h"
 
@@ -21,6 +22,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -150,6 +152,15 @@ static void emit_un(FhOpcode op, uintptr_t d, uintptr_t s1, uint64_t q) {
 /// dest, src1
 static void emit_un_ni(FhOpcode op, uintptr_t d, uintptr_t s1) {
     emit(ir(op, d, s1));
+}
+
+/// dest, src1, m= [, omega=] — omega absent when the caller chose no root
+static void emit_ntt(FhOpcode op, uintptr_t d, uintptr_t s1, uint64_t q,
+                     std::optional<uint64_t> omega) {
+    auto inst = ir(op, d, s1);
+    inst.modulus = midx(q);
+    inst.omega = omega;
+    emit(inst);
 }
 
 // ============================================================================
@@ -714,20 +725,57 @@ Polynomial sr_mulps(const Polynomial& a, const Scalar& s, uint64_t q) {
     return result;
 }
 
-Polynomial sr_ntt(const Polynomial& a, uint64_t q) {
-    auto result = make_result(a, Format::Evaluation);
+// Throws unless `omega` is a primitive 2N-th root of unity mod q, N being
+// `ring_dim`. `what` names the caller and, for an MRP, the residue.
+static void require_ntt_root(const std::string& what, uint64_t omega,
+                             uint64_t ring_dim, uint64_t q) {
+    if (!niobium::is_primitive_2n_root(omega, ring_dim, q))
+        throw std::invalid_argument(
+            what + ": omega " + std::to_string(omega) +
+            " is not a primitive 2N-th root of unity mod " + std::to_string(q) +
+            " for N = " + std::to_string(ring_dim));
+}
+
+// Throws unless `omegas` holds one valid root per residue of x, in base order.
+static void require_ntt_roots(const std::string& what, const MRP& x,
+                              const std::vector<uint64_t>& omegas) {
+    const auto& base = x.base();
+    if (omegas.size() != base.size())
+        throw std::invalid_argument(what + ": expected one root per residue (" +
+                                    std::to_string(base.size()) + "), got " +
+                                    std::to_string(omegas.size()));
+    for (size_t i = 0; i < base.size(); ++i)
+        require_ntt_root(what + " residue " + std::to_string(i), omegas[i],
+                         x[base[i]].ring_dimension(), base[i]);
+}
+
+// Records one sr_ntt or sr_intt, carrying `omega` when the caller chose a
+// root. Callers validate a chosen root first.
+static Polynomial record_ntt(FhOpcode op, const Polynomial& a, uint64_t q,
+                             std::optional<uint64_t> omega) {
+    auto result = make_result(a, op == FH_SR_NTT ? Format::Evaluation : Format::Coefficient);
     remember_modulus(a.impl()->address, q);
     remember_modulus(result.impl()->address, q);
-    emit_un(FH_SR_NTT, result.impl()->address, a.impl()->address, q);
+    emit_ntt(op, result.impl()->address, a.impl()->address, q, omega);
     return result;
 }
 
+Polynomial sr_ntt(const Polynomial& a, uint64_t q) {
+    return record_ntt(FH_SR_NTT, a, q, std::nullopt);
+}
+
+Polynomial sr_ntt_with_root(const Polynomial& a, uint64_t q, uint64_t omega) {
+    require_ntt_root("sr_ntt_with_root", omega, a.ring_dimension(), q);
+    return record_ntt(FH_SR_NTT, a, q, omega);
+}
+
 Polynomial sr_intt(const Polynomial& a, uint64_t q) {
-    auto result = make_result(a, Format::Coefficient);
-    remember_modulus(a.impl()->address, q);
-    remember_modulus(result.impl()->address, q);
-    emit_un(FH_SR_INTT, result.impl()->address, a.impl()->address, q);
-    return result;
+    return record_ntt(FH_SR_INTT, a, q, std::nullopt);
+}
+
+Polynomial sr_intt_with_root(const Polynomial& a, uint64_t q, uint64_t omega) {
+    require_ntt_root("sr_intt_with_root", omega, a.ring_dimension(), q);
+    return record_ntt(FH_SR_INTT, a, q, omega);
 }
 
 Polynomial sr_permute(const Polynomial& a,
@@ -987,6 +1035,27 @@ MRP mr_intt(const MRP& x) {
     MRP z(base, x[base[0]].ring_dimension());
     for (auto q : base) z[q] = sr_intt(x[q], q);
     return z;
+}
+
+// Records one sr_ntt or sr_intt per residue, omegas[i] belonging to
+// x.base()[i]. Callers validate every root first, so a rejected call leaves
+// the trace as it was.
+static MRP record_mr_ntt(FhOpcode op, const MRP& x, const std::vector<uint64_t>& omegas) {
+    const auto& base = x.base();
+    MRP z(base, x[base[0]].ring_dimension());
+    for (size_t i = 0; i < base.size(); ++i)
+        z[base[i]] = record_ntt(op, x[base[i]], base[i], omegas[i]);
+    return z;
+}
+
+MRP mr_ntt_with_roots(const MRP& x, const std::vector<uint64_t>& omegas) {
+    require_ntt_roots("mr_ntt_with_roots", x, omegas);
+    return record_mr_ntt(FH_SR_NTT, x, omegas);
+}
+
+MRP mr_intt_with_roots(const MRP& x, const std::vector<uint64_t>& omegas) {
+    require_ntt_roots("mr_intt_with_roots", x, omegas);
+    return record_mr_ntt(FH_SR_INTT, x, omegas);
 }
 
 MRP mr_automorph_eval(const MRP& x, uint64_t k) {

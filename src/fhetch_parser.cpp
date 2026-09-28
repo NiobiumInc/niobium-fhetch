@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -144,7 +145,9 @@ struct Driver {
 };
 
 // Drive one instruction through the FHETCH API. Returns false if it was
-// skipped (the only reason today is an unresolvable modulus).
+// skipped (the only reason today is an unresolvable modulus). Throws the
+// API's std::invalid_argument when it rejects an operand, which today is
+// only a recorded omega that is not a primitive 2N-th root for ring_dim.
 bool drive_instruction(const Instruction& inst, Driver& drv) {
     uint64_t q = 0;
     if (!drv.resolve(inst, q)) return false;
@@ -204,10 +207,15 @@ bool drive_instruction(const Instruction& inst, Driver& drv) {
 
     case FH_SR_NTT:
     case FH_SR_INTT: {
-        // omega is recovered by the reader but the API derives its own root,
-        // so there is nowhere to put it. Dropping it here is deliberate.
+        // A recorded root is recorded again, so the re-driven trace
+        // transforms with the root the original did.
         const Polynomial& a = drv.get_or_create_src(s1);
-        drv.put(d, (inst.opcode == FH_SR_NTT) ? sr_ntt(a, q) : sr_intt(a, q));
+        const bool forward = inst.opcode == FH_SR_NTT;
+        if (inst.omega.has_value())
+            drv.put(d, forward ? sr_ntt_with_root(a, q, *inst.omega)
+                               : sr_intt_with_root(a, q, *inst.omega));
+        else
+            drv.put(d, forward ? sr_ntt(a, q) : sr_intt(a, q));
         return true;
     }
 
@@ -312,7 +320,17 @@ bool drive_program(const ReadResult& read, uint64_t ring_dim,
 
     Driver drv(ring_dim, stats, inputs, outputs);
     for (const auto& inst : read.program.instructions) {
-        if (drive_instruction(inst, drv)) stats.instructions_replayed++;
+        // A rejected operand stops the drive rather than being skipped like an
+        // unresolvable modulus: the trace is invalid, not merely unreadable
+        // here. The message gains the line, as resolve()'s does.
+        bool replayed = false;
+        try {
+            replayed = drive_instruction(inst, drv);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument("line " + std::to_string(inst.line_number) +
+                                        ": " + e.what());
+        }
+        if (replayed) stats.instructions_replayed++;
         else stats.skipped_lines++;
     }
     drv.finalize_outputs();
