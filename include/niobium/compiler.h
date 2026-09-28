@@ -290,11 +290,30 @@ class Compiler {
     /// writing serialized_probes/<name>.ct into `dir`. For target "local" spawns
     /// the bundled fhetch_sim --project=<dir> (located via NBCC_FHETCH_SIM, else
     /// "fhetch_sim" on PATH); for any other target forwards to nbcc_fhetch_replay
-    /// --project=<dir> --target=<target>. Reads nothing from this Compiler — the
-    /// target, opt-level, and hardware-format flag all come from the call — so N
-    /// threads may call it concurrently with distinct dirs. opt_level and
-    /// niobium_hw (the full montgomery + bit-reversal format, i.e. --niobium_hw)
-    /// forward only to non-local targets.
+    /// --project=<dir> --target=<target> --out=<replay_output_directory(dir)>.
+    /// Reads nothing from this Compiler — the target, opt-level, and
+    /// hardware-format flag all come from the call — so N threads may call it
+    /// concurrently with distinct dirs. opt_level and niobium_hw (the full
+    /// montgomery + bit-reversal format, i.e. --niobium_hw) forward only to
+    /// non-local targets.
+    /// --project carries `dir` without a trailing directory separator.
+    /// For non-local targets, nbcc_fhetch_replay writes its output inside
+    /// `dir` instead of its CWD-relative default, so a caller that deletes
+    /// `dir` removes the replay output with it:
+    ///   - replay_output_directory(dir) holds the recording: the .seq trace,
+    ///     optimization_stats.json and the record-phase timing_summary.json.
+    ///   - replay_run_directory(dir) holds the run: the replay outputs
+    ///     (replay_outputs_*.json), timing.json and the timing_summary.json
+    ///     that accumulates the record and replay phases. Target FHETCH_SIM
+    ///     also lifts the project and replays the lifted copy there.
+    /// Outside `dir` land only timing files: the compiler's per-process
+    /// telemetry file, timing_summary_<role>_<pid>.json
+    /// (nb::write_timing_summary, src/Compiler.cpp; target FHETCH_SIM writes
+    /// two, one per process), in NB_TIMING_SUMMARY_DIR if set, else the CWD;
+    /// and, when NB_TIMING_SUMMARY_DIR is set, nbcc_fhetch_replay's mirror of
+    /// each timing_summary.json there, named from its directory's basename,
+    /// not its full path, so two projects with the same basename share
+    /// mirror names.
     bool replay_project(const std::string &target, const std::filesystem::path &dir,
                         const std::string &opt_level = "O0", bool niobium_hw = false);
 
@@ -456,5 +475,25 @@ class Compiler {
 
 /// Get the global Compiler singleton instance.
 Compiler &compiler();
+
+/// The directory a non-local replay_project() call passes to
+/// nbcc_fhetch_replay as --out for the project at `project_dir`:
+/// `project_dir/nbcc_fhetch_replay_source_<project_dir's own basename>` — the
+/// same name nbcc_fhetch_replay derives for itself by default, relocated
+/// inside `project_dir` instead of nbcc_fhetch_replay's CWD. It holds the
+/// replay's recording: the .seq trace, optimization_stats.json and the
+/// record-phase timing_summary.json. Tolerates a trailing directory separator
+/// on `project_dir`. Exposed, with replay_run_directory(), so other tooling
+/// (e.g. niobium-haze) can locate a replay's files without hardcoding names.
+std::filesystem::path replay_output_directory(const std::filesystem::path &project_dir);
+
+/// The directory a non-local replay_project() call's run lands in for the
+/// project at `project_dir`: replay_output_directory(project_dir)'s `.run`
+/// sibling, `<replay_output_directory(project_dir)>.run/` followed by the
+/// recording's own name. It holds the replay outputs
+/// (replay_outputs_*.json), timing.json and the timing_summary.json that
+/// accumulates the record and replay phases. Tolerates a trailing directory
+/// separator on `project_dir`.
+std::filesystem::path replay_run_directory(const std::filesystem::path &project_dir);
 
 } // namespace niobium

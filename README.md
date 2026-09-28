@@ -140,6 +140,27 @@ namespace niobium {
 }
 ```
 
+### Replay output directory
+
+For a non-`local` target, `replay()`/`replay_project()` pass
+`--out=replay_output_directory(dir)` to the compiler-side `nbcc_fhetch_replay`,
+so its output stays inside `dir` instead of its CWD. With `B` as `dir`'s
+basename:
+
+- `replay_output_directory(dir)`, `dir/nbcc_fhetch_replay_source_<B>/`, holds
+  the recording: the `.seq` trace, `optimization_stats.json` and the
+  record-phase `timing_summary.json`.
+- `replay_run_directory(dir)`,
+  `dir/nbcc_fhetch_replay_source_<B>.run/nbcc_fhetch_replay_source_<B>/`, holds
+  the run: `replay_outputs_*.json`, `timing.json` and the accumulated
+  `timing_summary.json`.
+
+Only timing files land outside `dir`: the per-process
+`timing_summary_<role>_<pid>.json`, in `NB_TIMING_SUMMARY_DIR` if set, else the
+CWD; and, when `NB_TIMING_SUMMARY_DIR` is set, a mirror of each
+`timing_summary.json` there. See `replay_project()`'s doc comment
+(`compiler.h`) for the details.
+
 ### `.fhetch` trace format
 
 The trace is a human-readable text file of FHETCH Polynomial IR operations:

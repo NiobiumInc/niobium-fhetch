@@ -1080,9 +1080,12 @@ bool Compiler::replay() {
 // call (nothing from impl_), so concurrent calls on distinct dirs are isolated.
 // "local" spawns the bundled open fhetch_sim --project=<dir>; any other target
 // forwards the project to the compiler-side nbcc_fhetch_replay --project=<dir>
-// --target=<target>, which runs the optimization pipeline and writes ciphertext
-// probes into <dir>/serialized_probes/ for result()/result_from() to read.
-// Each worker is located by its env var (else PATH name) via env_or.
+// --target=<target> --out=<replay_output_directory(dir)>, which runs the
+// optimization pipeline and writes ciphertext probes into
+// <dir>/serialized_probes/ for result()/result_from() to read. See
+// replay_output_directory()'s and replay_project()'s doc comments (compiler.h)
+// for what --out redirects and what still bypasses it. Each worker is located
+// by its env var (else PATH name) via env_or.
 
 // Locator: the env var if set and non-empty, else the PATH-resolved default
 // (NBCC_FHETCH_SIM/NBCC_FHETCH_REPLAY/NBCC_FHETCH_DRIVER -> fhetch_sim/...).
@@ -1091,20 +1094,40 @@ static std::string env_or(const char* name, const char* fallback) {
     return (v != nullptr && *v != '\0') ? std::string(v) : std::string(fallback);
 }
 
+// project_dir without a trailing directory separator. filename() is "" for
+// e.g. "/a/b/", since the separator makes the last path element empty.
+static std::filesystem::path without_trailing_separator(const std::filesystem::path& project_dir) {
+    return project_dir.has_filename() ? project_dir : project_dir.parent_path();
+}
+
+std::filesystem::path replay_output_directory(const std::filesystem::path& project_dir) {
+    const auto project = without_trailing_separator(project_dir);
+    return project / ("nbcc_fhetch_replay_source_" + project.filename().string());
+}
+
+std::filesystem::path replay_run_directory(const std::filesystem::path& project_dir) {
+    const auto recording = replay_output_directory(project_dir);
+    return std::filesystem::path(recording.string() + ".run") / recording.filename();
+}
+
 bool Compiler::replay_project(const std::string& target, const std::filesystem::path& dir,
                               const std::string& opt_level, bool niobium_hw) {
     // Build the worker command. "local" runs the bundled, open fhetch_sim (no
     // compiler dependency); any other target forwards the project to the
     // compiler-side nbcc_fhetch_replay. posix_spawnp with explicit argv (rather
     // than a shell string) avoids quoting hazards while preserving PATH lookup.
+    // nbcc_fhetch_replay names its run directory from --project's basename,
+    // which a trailing separator would empty.
+    const auto project = without_trailing_separator(dir);
     std::string exec;
     std::vector<std::string> args;
     if (target == "local") {
         exec = env_or("NBCC_FHETCH_SIM", "fhetch_sim");
-        args = {exec, "--project=" + dir.string()};
+        args = {exec, "--project=" + project.string()};
     } else {
         exec = env_or("NBCC_FHETCH_REPLAY", "nbcc_fhetch_replay");
-        args = {exec, "--project=" + dir.string(), "--target=" + target};
+        args = {exec, "--project=" + project.string(), "--target=" + target,
+                "--out=" + replay_output_directory(project).string()};
         // Hardware format (--niobium_hw = montgomery + bit_reversal) and opt-level
         // are replay-time choices, forwarded only when set / non-default so the
         // ordinary-O0 argv is unchanged.
