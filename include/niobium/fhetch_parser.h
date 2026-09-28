@@ -100,6 +100,13 @@ struct DriveOutputs {
 /// @param inputs    Optional — per-source-address input data.
 /// @param outputs   Optional — per-source-address output probe tags.
 /// @return true if the file was read and at least one instruction replayed.
+/// @throws std::invalid_argument  "line <N>: <reason>" when the API rejects an
+///         instruction's operand — today only an `omega` that is not a
+///         primitive 2N-th root of unity mod its modulus for `ring_dim`. N is
+///         the text line, or the 1-based record index of a `.fhex`. By then
+///         the instructions before N, and the inputs they read, are already
+///         recorded into the caller's session; the rejected one records
+///         nothing, and no outputs are tagged.
 bool parse_and_drive(const std::filesystem::path& path,
                      uint64_t ring_dim,
                      DriveStats& stats,
@@ -108,6 +115,7 @@ bool parse_and_drive(const std::filesystem::path& path,
 
 /// Same as parse_and_drive() but reads from an in-memory string instead of a
 /// file on disk. Useful in unit tests.
+/// @throws std::invalid_argument  as parse_and_drive() does.
 bool parse_and_drive_text(const std::string& text,
                           uint64_t ring_dim,
                           DriveStats& stats,

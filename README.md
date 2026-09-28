@@ -79,8 +79,10 @@ Baseline instructions (map 1:1 to hardware ISA):
 | `sr_permute(a,...)` | MORPH1+MORPH2| General permutation with sign flips      |
 | `halt()`            | STOP         | End of trace                             |
 
+`sr_ntt` and `sr_intt` record no root, so the consumer uses the minimal primitive 2N-th root of unity mod q. `sr_ntt_with_root(a,q,omega)` and `sr_intt_with_root(a,q,omega)` record the same instructions with a caller-chosen primitive 2N-th root psi, validated before recording; the inverse takes the same forward root psi, not its inverse.
+
 **Multi-residue gadgets** lower to per-residue baseline instructions:
-`mr_addp`, `mr_subp`, `mr_mulp`, `mr_ntt`, `mr_intt`, `mr_zeros`, `mr_append_srp`, `mr_union`, `mr_subset`, `fast_base_convert`, `rescale_fbc`, `mrpa_dotproduct`, `dig_decomp`.
+`mr_addp`, `mr_subp`, `mr_mulp`, `mr_ntt`, `mr_intt`, `mr_ntt_with_roots`, `mr_intt_with_roots` (one root per residue), `mr_zeros`, `mr_append_srp`, `mr_union`, `mr_subset`, `fast_base_convert`, `rescale_fbc`, `mrpa_dotproduct`, `dig_decomp`.
 
 **Data types** (opaque, pimpl pattern): `Polynomial`, `Scalar`, `MRP`, `MRS`, `SRPArray`, `MRPArray`.
 

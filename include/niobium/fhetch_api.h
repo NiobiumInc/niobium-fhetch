@@ -502,12 +502,31 @@ Polynomial sr_mulps(const Polynomial& a, const Scalar& s, uint64_t q);
 /// Negacyclic Number Theoretic Transform.
 /// Takes a from coefficient representation to evaluation representation
 /// relative to modulus q, using a 2N-th primitive root of unity psi mod q.
+/// Records no root, so the consumer uses the minimal primitive 2N-th root of
+/// unity mod q; sr_ntt_with_root records a caller-chosen one.
 Polynomial sr_ntt(const Polynomial& a, uint64_t q);
+
+/// Negacyclic NTT with a caller-chosen root: records `omega` as psi. Slot j
+/// of the result holds a(psi^(2*brv(j) + 1)) mod q, brv reversing log2(N)
+/// bits, so the root fixes which evaluation point lands in which slot.
+/// Throws std::invalid_argument, recording nothing, unless omega is a
+/// primitive 2N-th root of unity mod q for N = a.ring_dimension(), a power of
+/// two, written in [1, q): omega^N == q - 1 (mod q). 0 never is, and neither
+/// is omega + q, so each root has one spelling in the trace.
+Polynomial sr_ntt_with_root(const Polynomial& a, uint64_t q, uint64_t omega);
 
 /// Inverse Negacyclic Number Theoretic Transform.
 /// Takes a from evaluation representation to coefficient representation
-/// relative to modulus q.
+/// relative to modulus q. Records no root, so the consumer uses the minimal
+/// primitive 2N-th root of unity mod q; sr_intt_with_root records a
+/// caller-chosen one.
 Polynomial sr_intt(const Polynomial& a, uint64_t q);
+
+/// Inverse NTT with a caller-chosen root. `omega` is the same forward root
+/// psi that sr_ntt_with_root takes, not its inverse:
+///   sr_intt_with_root(sr_ntt_with_root(a, q, psi), q, psi) == a.
+/// Validated as sr_ntt_with_root validates it.
+Polynomial sr_intt_with_root(const Polynomial& a, uint64_t q, uint64_t omega);
 
 /// General permutation with sign flips.
 /// @param a     Input polynomial.
@@ -658,8 +677,21 @@ MRP mr_subps(const MRP& x, const MRS& s);
 /// MRP NTT: apply sr_ntt to each residue.
 MRP mr_ntt(const MRP& x);
 
+/// MRP NTT with one caller-chosen root per residue:
+///   z[q_i] = sr_ntt_with_root(x[q_i], q_i, omegas[i]),  q_i = x.base()[i].
+/// Throws std::invalid_argument, recording nothing, unless omegas.size() ==
+/// x.num_residues() and each omegas[i] is a primitive 2N-th root of unity
+/// mod q_i in [1, q_i).
+MRP mr_ntt_with_roots(const MRP& x, const std::vector<uint64_t>& omegas);
+
 /// MRP inverse NTT: apply sr_intt to each residue.
 MRP mr_intt(const MRP& x);
+
+/// MRP inverse NTT with one caller-chosen root per residue:
+///   z[q_i] = sr_intt_with_root(x[q_i], q_i, omegas[i]),  q_i = x.base()[i].
+/// omegas holds the forward roots mr_ntt_with_roots took, validated as
+/// mr_ntt_with_roots validates them.
+MRP mr_intt_with_roots(const MRP& x, const std::vector<uint64_t>& omegas);
 
 /// MRP Galois automorphism (X -> X^k) in evaluation representation:
 ///   z[q] = sr_automorph_eval(x[q], k)
