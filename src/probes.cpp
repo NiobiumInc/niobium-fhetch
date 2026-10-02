@@ -484,6 +484,35 @@ void openfhe_cprobe_muli(uintptr_t dst, uintptr_t src, uint64_t immediate,
     invalidate_clone_parent_on_write(da);
 }
 
+// dst = src_acc + src_mul * immediate (mod modulus), src_mul a residue mod
+// src_modulus taken unreduced (OpenFHE MultAccEqNoCheck, the fast-base-
+// conversion term of ApproxSwitchCRTBasis with WITH_REDUCED_NOISE=OFF).
+// sr_mulps under `modulus` reduces the full product, so the cross-modulus
+// operand is exact in ordinary form; the hardware lowering re-domains it.
+// The product needs its own address because dst usually IS src_acc; a
+// scratch address is borrowed from the free pool and returned after the add.
+void openfhe_cprobe_multacceq(uintptr_t dst, uintptr_t src_acc,
+                              uintptr_t src_mul, uint64_t immediate,
+                              uint64_t /*src_modulus*/, uint64_t modulus) {
+    if (!should_record()) return;
+    if (modulus) immediate %= modulus;  // OpenFHE passes the immediate unreduced
+    std::scoped_lock lock(g_probe_mutex);
+    uintptr_t da  = map_address(dst);
+    uintptr_t acc = resolve_inplace_src(map_address(src_acc), da);
+    uintptr_t sm  = map_address(src_mul);
+    uintptr_t tmp = 0;
+    if (!g_compact_free_pool.empty()) {
+        tmp = g_compact_free_pool.back();
+        g_compact_free_pool.pop_back();
+    } else {
+        tmp = g_next_fhetch_addr++;
+    }
+    emit_ps(FH_SR_MULPS, tmp, sm, immediate, modulus);
+    emit_pp(FH_SR_ADDP, da, acc, tmp, modulus);
+    g_compact_free_pool.push_back(tmp);
+    invalidate_clone_parent_on_write(da);
+}
+
 // ============================================================================
 // Transform and permutation operations
 // ============================================================================
