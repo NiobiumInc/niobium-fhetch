@@ -2,13 +2,13 @@
 """simple_ops client — Python port of tests/simple_ops/client.cpp.
 
 Generates a CKKS context + keys, encrypts two values, serializes everything for
-the server. Pure OpenFHE (no niobium session). Usage: client.py <dir> [a] [b].
+the server. Pure OpenFHE (no niobium session). Usage: client.py <dir> [a] [b] [ring_dim]  (ring_dim default 2^16).
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from _nbcommon import o, BIN  # noqa: E402  (loads libnbfhetch, imports openfhe)
+from _nbcommon import o, BIN, ring_dim_arg  # noqa: E402  (loads libnbfhetch, imports openfhe)
 
 
 def main(argv):
@@ -20,7 +20,7 @@ def main(argv):
     # CKKS params identical to client.cpp (compiler TOY defaults).
     p = o.CCParamsCKKSRNS()
     p.SetSecurityLevel(o.SecurityLevel.HEStd_NotSet)
-    p.SetRingDim(2048)
+    p.SetRingDim(ring_dim_arg(argv, 4))
     p.SetMultiplicativeDepth(3)
     p.SetScalingModSize(42)
     p.SetFirstModSize(57)

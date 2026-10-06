@@ -68,12 +68,12 @@ build-python-release: $(OPENFHE_BUILD_DEP_RELEASE) config-python-release ## Buil
 # Python analog of `define roundtrip-simple-op`: for a given op ($1), drive
 # client -> server (primary replay) -> decrypt -> fhetch_driver (secondary
 # replay) -> decrypt. Mirrors the C++ helper; only the binary/python-script
-# invocation differs (ring dim is fixed at 2048 in the client scripts).
+# invocation differs (clients are passed N = TEST_RING_DIM, see the Makefile).
 define roundtrip-simple-op-python
 	@echo ""
 	@echo "=== Roundtrip $(1) (python) ==="
 	@rm -rf simple_ops_keys simple_ops_server_workload_*
-	@$(PY_EXE) bindings/python/tests/simple_ops/client.py simple_ops_keys $(2) $(3) 2>&1 | tail -1
+	@$(PY_EXE) bindings/python/tests/simple_ops/client.py simple_ops_keys $(2) $(3) $(TEST_RING_DIM) 2>&1 | tail -1
 	@$(PY_EXE) bindings/python/tests/simple_ops/server.py simple_ops_keys $(1) --no-ring-dim-check 2>&1 | grep -E "Complete:|ERROR" | head -3 || true
 	@echo "  -- primary decrypt --"
 	@$(PY_EXE) bindings/python/tests/simple_ops/decrypt.py simple_ops_keys $(1) ct_result.bin 2>&1 | grep -E "PASS|FAIL"
@@ -81,7 +81,7 @@ define roundtrip-simple-op-python
 	@WORKLOAD_DIR=$$(ls -d simple_ops_server_workload_simple_ops_op_$(1) 2>/dev/null || true); \
 	 if [ -z "$$WORKLOAD_DIR" ]; then echo "  [SKIP] no workload dir"; exit 0; fi; \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim 2048 --no-ring-dim-check \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc simple_ops_keys/cc.bin \
 	     --output-ct result:simple_ops_keys/ct_result_secondary.bin 2>&1 \
@@ -110,7 +110,7 @@ test-roundtrip-plaintext-add-python-release: build-python-release ## Full python
 	$(call set-build-config,Release,build)
 	@rm -rf plaintext_add_keys plaintext_add_server_workload_*
 	@echo "=== Plaintext-Add client (python) ==="
-	$(PY_EXE) bindings/python/tests/plaintext_add/client.py plaintext_add_keys
+	$(PY_EXE) bindings/python/tests/plaintext_add/client.py plaintext_add_keys $(TEST_RING_DIM)
 	@echo "=== Plaintext-Add server (python) ==="
 	$(PY_EXE) bindings/python/tests/plaintext_add/server.py plaintext_add_keys --no-ring-dim-check
 	@echo "=== Plaintext-Add primary decrypt ==="
@@ -118,7 +118,7 @@ test-roundtrip-plaintext-add-python-release: build-python-release ## Full python
 	@echo "=== Plaintext-Add fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d plaintext_add_server_workload_* 2>/dev/null); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim 2048 --no-ring-dim-check \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc plaintext_add_keys/cc.bin \
 	     --output-ct output_cipher:plaintext_add_keys/ct_result_secondary.bin
@@ -129,7 +129,7 @@ test-roundtrip-bootstrap-python-release: build-python-release ## Full python rou
 	$(call set-build-config,Release,build)
 	@rm -rf bootstrap_keys bootstrap_server_workload_*
 	@echo "=== Bootstrap client (python) ==="
-	$(PY_EXE) bindings/python/tests/bootstrap/client.py bootstrap_keys
+	$(PY_EXE) bindings/python/tests/bootstrap/client.py bootstrap_keys $(TEST_RING_DIM)
 	@echo "=== Bootstrap server (python) ==="
 	$(PY_EXE) bindings/python/tests/bootstrap/server.py bootstrap_keys --no-ring-dim-check
 	@echo "=== Bootstrap primary decrypt ==="
@@ -137,7 +137,7 @@ test-roundtrip-bootstrap-python-release: build-python-release ## Full python rou
 	@echo "=== Bootstrap fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d bootstrap_server_workload_* 2>/dev/null); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim 2048 --no-ring-dim-check \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc bootstrap_keys/cc.bin \
 	     --output-ct output_cipher:bootstrap_keys/ct_result_secondary.bin
