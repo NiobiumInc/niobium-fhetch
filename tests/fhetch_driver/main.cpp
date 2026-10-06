@@ -108,7 +108,7 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr
             << "Usage: " << argv[0] << " <trace.fhetch>\n"
-            << "           [--ring-dim N]\n"
+            << "           [--ring-dim N]       # default 65536 (2^16)\n"
             << "           [--source-dir DIR]   # primary workload dir\n"
             << "           [--cc FILE]          # crypto context (.bin)\n"
             << "           [--output-ct NAME:PATH]  # serialize result CT\n"
@@ -117,7 +117,7 @@ int main(int argc, char* argv[]) {
     }
 
     fs::path trace_path = argv[1];
-    uint64_t ring_dim = 2048;
+    uint64_t ring_dim = 1ULL << 16;  // Niobium hardware's N; tests pass --ring-dim 2048
     fs::path source_dir;
     fs::path cc_path;
     std::vector<std::pair<std::string, fs::path>> output_ct_targets;

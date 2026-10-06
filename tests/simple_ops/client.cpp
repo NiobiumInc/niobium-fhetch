@@ -4,9 +4,10 @@
 // Simple ops example — client side (CKKS)
 //
 // Generates CKKS crypto context + keys, encrypts two values.
-// Matching compiler's TOY defaults: qi=42, firstMod=57, N=2048, depth=2.
+// Matching compiler's TOY defaults: qi=42, firstMod=57, depth=2.
 //
-// Usage: ./simple_ops_client [output_dir [a b]]
+// Usage: ./simple_ops_client [output_dir [a [b [ring_dim]]]]
+//   ring_dim defaults to 65536 (2^16)
 
 #include "openfhe.h"
 
@@ -25,7 +26,9 @@ int main(int argc, char* argv[]) {
 
     if (argc > 1) outputDir = argv[1];
     if (argc > 2) a = std::stod(argv[2]);
+    uint32_t ring_dim = 65536;                  // 2^16: the ring dimension Niobium hardware runs
     if (argc > 3) b = std::stod(argv[3]);
+    if (argc > 4) ring_dim = static_cast<uint32_t>(std::stoul(argv[4]));
 
     std::cout << "=== Simple Ops — Client ===" << std::endl;
     std::cout << "a = " << a << ", b = " << b << std::endl;
@@ -34,7 +37,7 @@ int main(int argc, char* argv[]) {
 
     CCParams<CryptoContextCKKSRNS> parameters;
     parameters.SetSecurityLevel(HEStd_NotSet);
-    parameters.SetRingDim(2048);
+    parameters.SetRingDim(ring_dim);   // test targets pass 2^11 (TEST_RING_DIM in the Makefile)
     parameters.SetMultiplicativeDepth(3);
     parameters.SetScalingModSize(42);
     parameters.SetFirstModSize(57);

@@ -27,6 +27,7 @@
 #include "niobium/compiler.h"
 
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace fhetch = niobium::fhetch;
@@ -48,12 +49,18 @@ int main(int argc, char* argv[]) {
     niobium::compiler().cache_parameters(params);
 
     // ---- Parameters ----
-    // N = 2048 is a common CKKS ring dimension. The two primes are
-    // ≡ 1 (mod 2N = 4096) and fit under OpenFHE's 60-bit NativeInteger limit,
-    // so the simulator can actually execute NTTs on them.
-    constexpr uint64_t N  = 2048;
-    constexpr uint64_t q1 = 0x3FFFFE80001ULL;   // 42-bit, 2N-friendly
-    constexpr uint64_t q2 = 0x40000560001ULL;   // 42-bit, 2N-friendly
+    // N defaults to 2^16, the only ring dimension Niobium hardware runs;
+    // `--ring-dim N` overrides it (the Makefile test targets pass 2^11 with
+    // --no-ring-dim-check). init() above has already removed the Niobium flags
+    // from argv, so only example arguments remain. Both primes are ≡ 1 (mod
+    // 2^17), so they are NTT-friendly for every N up to 2^16, pass the hardware
+    // prime check (≡ 1 mod 2^16), and fit under OpenFHE's 60-bit NativeInteger
+    // limit, so the simulator can actually execute NTTs on them.
+    uint64_t N = 1ULL << 16;
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--ring-dim") N = std::stoull(argv[i + 1]);
+    constexpr uint64_t q1 = 0x3FFFFE80001ULL;   // 42-bit, ≡ 1 mod 2^19
+    constexpr uint64_t q2 = 0x40000560001ULL;   // 43-bit, ≡ 1 mod 2^17
 
     // No OpenFHE CryptoContext here, so set the ring dimension explicitly
     // for the simulator's benefit.

@@ -8,7 +8,8 @@
 //
 // This file is pure OpenFHE — no Niobium compiler dependency.
 //
-// Usage: ./plaintext_add_client [output_dir]
+// Usage: ./plaintext_add_client [output_dir [ring_dim]]
+//   ring_dim defaults to 65536 (2^16)
 
 #include "openfhe.h"
 
@@ -23,7 +24,9 @@ using namespace lbcrypto;
 
 int main(int argc, char* argv[]) {
     std::string outputDir = "plaintext_add_keys";
+    uint32_t ring_dim = 65536;                  // 2^16: the ring dimension Niobium hardware runs
     if (argc > 1) outputDir = argv[1];
+    if (argc > 2) ring_dim = static_cast<uint32_t>(std::stoul(argv[2]));
 
     std::cout << "=== CKKS Plaintext-Add — Client (Key Generation) ===" << std::endl;
     std::cout << "Output directory: " << outputDir << std::endl;
@@ -34,7 +37,7 @@ int main(int argc, char* argv[]) {
     CCParams<CryptoContextCKKSRNS> parameters;
     parameters.SetSecretKeyDist(UNIFORM_TERNARY);
     parameters.SetSecurityLevel(HEStd_NotSet);
-    parameters.SetRingDim(2048);
+    parameters.SetRingDim(ring_dim);   // test targets pass 2^11 (TEST_RING_DIM in the Makefile)
     parameters.SetScalingModSize(59);
     parameters.SetScalingTechnique(FLEXIBLEAUTO);
     parameters.SetFirstModSize(60);
