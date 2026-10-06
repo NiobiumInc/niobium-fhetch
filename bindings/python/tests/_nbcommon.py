@@ -18,3 +18,13 @@ ctypes.CDLL(_lib, mode=ctypes.RTLD_GLOBAL)
 import openfhe as o  # noqa: E402
 
 BIN = o.BINARY
+
+# Niobium hardware runs exactly one ring dimension, 2^16. The clients default
+# to it; the Makefile test targets pass 2^11 (TEST_RING_DIM) with
+# --no-ring-dim-check, for speed.
+HW_RING_DIM = 1 << 16
+
+
+def ring_dim_arg(argv, i):
+    """Ring dimension from argv[i], else the hardware's 2^16."""
+    return int(argv[i]) if len(argv) > i else HW_RING_DIM
