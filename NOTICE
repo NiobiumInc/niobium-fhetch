@@ -2,7 +2,7 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 ============================================================
 
 Project: niobium-fhetch
-Generated: 2026-10-07
+Generated: 2026-10-16
 Tool: SCANOSS (snippet detection with License dataset)
 Components: 73
 
@@ -21,12 +21,12 @@ These require manual review to determine licensing terms.
 
 LICENSE SUMMARY
 
-  Apache-2.0: 17 component(s)
+  Apache-2.0: 16 component(s)
   Apache-2.0 WITH LLVM-exception: 2 component(s)
   Apache-2.0 WITH LLVM-exception AND NCSA: 1 component(s)
   Apache-2.0 WITH LLVM-exception AND NCSA AND NCSA OR MIT AND NCSA AND MIT: 1 component(s)
   BSD-2-Clause: 6 component(s)
-  BSD-3-Clause: 29 component(s)
+  BSD-3-Clause: 30 component(s)
   BSD-3-Clause-LBNL: 1 component(s)
   BSL-1.0: 1 component(s)
   CC0-1.0: 1 component(s)
@@ -477,6 +477,7 @@ COMPONENT ATTRIBUTIONS
     Copyright (c) 2004; Google Inc.
     Copyright (c) 2006; Google Inc.
     Copyright (c) 2007; Google Inc.
+    Copyright (c) 2008-2009; Google Inc.
     Copyright (c) 2009; Google Inc.
     Copyright (c) 2011; Google Inc.
     Copyright (c) 2013; Google Inc.
@@ -599,7 +600,7 @@ COMPONENT ATTRIBUTIONS
   PURL: pkg:github/philippd3/lab06
   Copyright:
     Copyright 2007; Google Inc.
-  License: Apache-2.0, BSD-3-Clause
+  License: BSD-3-Clause
 
   libbacktrace
   Version: 86885d1
@@ -903,7 +904,7 @@ COMPONENT ATTRIBUTIONS
   PURL: pkg:github/andreanivan/pkcs11_solid
   Copyright:
     Copyright 2007; Google Inc.
-  License: UNKNOWN
+  License: BSD-3-Clause, UNKNOWN
 
   platform.external.googletest
   Version: android-14.0.0_r32
