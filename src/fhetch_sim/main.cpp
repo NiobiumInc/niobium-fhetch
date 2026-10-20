@@ -3,7 +3,7 @@
 //
 // fhetch_sim — CLI for the FHETCH instruction-set simulator.
 //
-// Usage: fhetch_sim <trace.fhetch> --ring-dim <N>
+// Usage: fhetch_sim <trace.fhex|trace.fhetch> --ring-dim <N>
 //    or: fhetch_sim --project <dir>   (disk-driven replay of an on-disk project)
 
 #include "local_replay.h"
@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
 
     if (trace_file.empty()) {
         std::cerr << "Usage: " << argv[0]
-                  << " <trace.fhetch> --ring-dim N | --project <dir>" << std::endl;
+                  << " <trace.fhex|trace.fhetch> --ring-dim N | --project <dir>" << std::endl;
         return 1;
     }
 

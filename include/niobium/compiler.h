@@ -45,8 +45,10 @@ enum class CapturedKind : uint8_t { SRP, MRP, SRPArray, MRPArray };
 /// Which serialization of the recorded trace to write.
 ///
 /// Selected with `--trace-format=<text|binary|both>` on the CLI consumed by
-/// init(). The two forms describe the same program; the binary one is smaller
-/// and faster to read, and the text one is human-readable.
+/// init(); Binary is the default. The two forms describe the same program:
+/// the binary one (`.fhex`) is smaller and faster to read, the text one
+/// (`.fhetch`) is human-readable. Readers tell them apart by content, not
+/// by file name.
 enum class TraceFormat : uint8_t { Text, Binary, Both };
 
 /// Per-record shape returned by the for_each_captured_* helpers in
