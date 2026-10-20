@@ -228,22 +228,23 @@ test-simple-fhetch-release: build-release ## Record + replay the FHETCH-only sim
 	@rm -rf simple_fhetch_example_simple
 	$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check --ring-dim $(TEST_RING_DIM)
 
-# Re-drive a .fhetch trace through the API via tests/fhetch_driver.
-# Pass a trace path as TRACE=/path/to/file.fhetch, its ring dim as N (default TEST_RING_DIM).
-# If TRACE is unset, the target runs simple_fhetch first to produce a trace
-# and drives that one — so `make test-fhetch-driver[-release]` works with
-# no arguments.
+# Re-drive a trace through the API via tests/fhetch_driver.
+# Pass a trace path as TRACE=/path/to/file.fhex (or .fhetch), its ring dim as
+# N (default TEST_RING_DIM). If TRACE is unset, the target runs simple_fhetch
+# first with --trace-format=text to produce a text trace and drives that one
+# (the binary form, the default, is covered by test-fhetch-driver-binary-*),
+# so `make test-fhetch-driver[-release]` works with no arguments.
 TRACE ?=
 N     ?= $(TEST_RING_DIM)
 
 SIMPLE_TRACE := simple_fhetch_example_simple/simple_fhetch_example_simple.fhetch
 
-test-fhetch-driver: build ## Re-drive a .fhetch trace (Debug). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's trace
+test-fhetch-driver: build ## Re-drive a trace (Debug). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's text trace
 	$(call set-build-config,Debug,dbuild)
 	@if [ -z "$(TRACE)" ]; then \
-		echo "[test-fhetch-driver] TRACE unset — running simple_fhetch to produce one"; \
+		echo "[test-fhetch-driver] TRACE unset — running simple_fhetch to produce a text one"; \
 		rm -rf simple_fhetch_example_simple; \
-		$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check --ring-dim $(TEST_RING_DIM); \
+		$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check --ring-dim $(TEST_RING_DIM) --trace-format=text; \
 	fi
 	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N) --no-ring-dim-check
 
@@ -259,12 +260,12 @@ test-fhetch-driver-binary-release: build-release ## Re-drive a binary .fhex trac
 	 echo "  driving $$FHEX"; \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $$FHEX --ring-dim $(N) --no-ring-dim-check
 
-test-fhetch-driver-release: build-release ## Re-drive a .fhetch trace (Release). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's trace
+test-fhetch-driver-release: build-release ## Re-drive a trace (Release). TRACE=<path> N=<ring_dim>; defaults to simple_fhetch's text trace
 	$(call set-build-config,Release,build)
 	@if [ -z "$(TRACE)" ]; then \
-		echo "[test-fhetch-driver-release] TRACE unset — running simple_fhetch to produce one"; \
+		echo "[test-fhetch-driver-release] TRACE unset — running simple_fhetch to produce a text one"; \
 		rm -rf simple_fhetch_example_simple; \
-		$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check --ring-dim $(TEST_RING_DIM); \
+		$(BUILD_DIR)/examples/simple_fhetch --no-ring-dim-check --ring-dim $(TEST_RING_DIM) --trace-format=text; \
 	fi
 	$(BUILD_DIR)/tests/fhetch_driver/fhetch_driver $${TRACE:-$(SIMPLE_TRACE)} --ring-dim $(N) --no-ring-dim-check
 
@@ -322,7 +323,8 @@ define roundtrip-simple-op
 	@WORKLOAD_DIR=$$(ls -d simple_ops_server_workload_simple_ops_op_$(1) 2>/dev/null || true); \
 	 if [ -z "$$WORKLOAD_DIR" ]; then echo "  [SKIP] no workload dir"; exit 0; fi; \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.$$([ -f $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhex ] && echo fhex || echo fhetch) \
+	     --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc simple_ops_keys/cc.bin \
 	     --output-ct result:simple_ops_keys/ct_result_secondary.bin 2>&1 \
@@ -367,7 +369,8 @@ test-roundtrip-bootstrap-release: build-release ## Full roundtrip for bootstrap 
 	@echo "=== Bootstrap fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d bootstrap_server_workload_* 2>/dev/null); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.$$([ -f $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhex ] && echo fhex || echo fhetch) \
+	     --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc bootstrap_keys/cc.bin \
 	     --output-ct output_cipher:bootstrap_keys/ct_result_secondary.bin
@@ -386,7 +389,8 @@ test-roundtrip-plaintext-add-release: build-release ## Full roundtrip for plaint
 	@echo "=== Plaintext-Add fhetch_driver (secondary) ==="
 	@WORKLOAD_DIR=$$(ls -d plaintext_add_server_workload_* 2>/dev/null); \
 	 $(BUILD_DIR)/tests/fhetch_driver/fhetch_driver \
-	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhetch --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
+	     $$WORKLOAD_DIR/$$WORKLOAD_DIR.$$([ -f $$WORKLOAD_DIR/$$WORKLOAD_DIR.fhex ] && echo fhex || echo fhetch) \
+	     --ring-dim $(TEST_RING_DIM) --no-ring-dim-check \
 	     --source-dir $$WORKLOAD_DIR \
 	     --cc plaintext_add_keys/cc.bin \
 	     --output-ct output_cipher:plaintext_add_keys/ct_result_secondary.bin

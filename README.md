@@ -161,9 +161,18 @@ CWD; and, when `NB_TIMING_SUMMARY_DIR` is set, a mirror of each
 `timing_summary.json` there. See `replay_project()`'s doc comment
 (`compiler.h`) for the details.
 
-### `.fhetch` trace format
+### Trace format: `.fhex` and `.fhetch`
 
-The trace is a human-readable text file of FHETCH Polynomial IR operations:
+A recording writes its trace in binary form by default, as `<program>.fhex`:
+the same program as the text form below, about 4x smaller and faster to
+read. `--trace-format=text` on the host's command line (parsed by
+`Compiler::init`) writes the human-readable `<program>.fhetch` instead, and
+`--trace-format=both` writes the two. Every reader (`fhetch_sim`,
+`fhetch_driver`, `Compiler::replay`, the cache check behind
+`is_cache_valid`) tells the forms apart by content, not by file name, and
+`fhetch_replay.json` names whichever file was written.
+
+The text form is a human-readable file of FHETCH Polynomial IR operations:
 
 ```
 # Niobium FHETCH Trace
@@ -208,7 +217,7 @@ niobium-fhetch/
     compiler_internal.h       # Internal API between compiler/probes
     probes.cpp                # C-linkage openfhe_cprobe_* implementations
     auto_facade.cpp           # capture_crypto_context / tag_keys / tag_input
-    trace_writer.{h,cpp}      # .fhetch text emitter
+    trace_writer.{h,cpp}      # trace emitter (.fhex binary, .fhetch text)
     cereal_io.h               # Binary I/O helpers
     fhetch_sim/               # Optional: trace parser + OpenFHE executor
   vendor/

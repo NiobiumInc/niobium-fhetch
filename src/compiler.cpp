@@ -127,10 +127,12 @@ struct Compiler::Impl {
     // --target=<value> on the CLI consumed by init().
     std::string target = "local";
 
-    // Which serialization of the trace to write. Selected via
+    // Which serialization of the trace to write. Binary (.fhex) by default:
+    // the same program as the text .fhetch, about 4x smaller and faster to
+    // read, and every reader detects the form from the content. Selected via
     // --trace-format=<value> on the CLI consumed by init(). Independent of
     // the replay target.
-    TraceFormat trace_format = TraceFormat::Text;
+    TraceFormat trace_format = TraceFormat::Binary;
 
     // Optimization level for the compiler-side replay, normalized to "O0".."O3".
     // Defaults to O0 (conservative); overridable via --opt-level=<v> on the CLI.
@@ -272,9 +274,9 @@ void Compiler::init(int& argc, char** argv) {
     //   --target=<t>          replay target: "local" (default, in-process
     //                         FHETCH sim); any other value hands replay off
     //                         to nbcc_fhetch_replay
-    //   --trace-format=<f>    trace serialization: "text" (default,
-    //                         human-readable .fhetch), "binary" (.fhex, ~4x
-    //                         smaller and faster to read), or "both"
+    //   --trace-format=<f>    trace serialization: "binary" (default, .fhex,
+    //                         ~4x smaller and faster to read), "text"
+    //                         (human-readable .fhetch), or "both"
     //   --hollow              hollow recording (trace without real math)
     //   --opt-level=<O0..O3>  optimization level, forwarded on replay handoff
     //   -v                    verbose diagnostics
@@ -329,9 +331,9 @@ void Compiler::init(int& argc, char** argv) {
     }
     argc = write_pos;
 
-    if (impl_->trace_format != TraceFormat::Text) {
+    if (impl_->trace_format != TraceFormat::Binary) {
         std::cout << "[NIOBIUM] Trace format: "
-                  << (impl_->trace_format == TraceFormat::Binary ? "binary"
+                  << (impl_->trace_format == TraceFormat::Text ? "text"
                                                                 : "both")
                   << std::endl;
     }
@@ -455,11 +457,29 @@ void Compiler::cache_parameters(CacheParameters& params) {
     impl_->cache_suffix = suffix;
 }
 
+// The trace a recording left in `dir`, whichever form it was written in: the
+// binary .fhex (the default) or the text .fhetch, the binary one first when
+// both exist. Empty when there is no recording.
+static std::filesystem::path existing_trace_path(const std::filesystem::path& dir,
+                                                 const std::string& program) {
+    for (const char* ext : {".fhex", ".fhetch"}) {
+        auto path = dir / (program + ext);
+        if (std::filesystem::exists(path)) return path;
+    }
+    return {};
+}
+
+// The file name the writer gives the trace for a format: .fhex when binary
+// only, else .fhetch (the text file is the primary of "both").
+static std::string trace_file_name(TraceFormat format, const std::string& program) {
+    return program + (format == TraceFormat::Binary ? ".fhex" : ".fhetch");
+}
+
 bool Compiler::is_cache_valid() {
-    // Check if a trace file already exists for this program configuration
+    // Check if a trace file, in either form, already exists for this program
+    // configuration
     auto dir = get_program_directory();
-    auto trace_path = dir / (impl_->full_program_name() + ".fhetch");
-    return std::filesystem::exists(trace_path);
+    return !existing_trace_path(dir, impl_->full_program_name()).empty();
 }
 
 // ============================================================================
@@ -788,10 +808,10 @@ bool Compiler::replay() {
     }
 
     if (impl_->last_trace_path.empty()) {
-        // Look for an existing trace (cached)
+        // Look for an existing trace (cached), in either form
         auto dir = get_program_directory();
-        auto path = dir / (impl_->full_program_name() + ".fhetch");
-        if (std::filesystem::exists(path)) {
+        auto path = existing_trace_path(dir, impl_->full_program_name());
+        if (!path.empty()) {
             impl_->last_trace_path = path;
         } else {
             std::cerr << "[NIOBIUM] No trace file found for replay" << std::endl;
@@ -1291,9 +1311,7 @@ void Compiler::write_replay_json() {
     // Name the artifact that was actually written. With --trace-format=binary
     // there is no .fhetch on disk, so hardcoding that extension would point a
     // consumer at a file that does not exist.
-    replay["program_name"] =
-        impl_->trace_format == TraceFormat::Binary ? prog + ".fhex"
-                                                  : prog + ".fhetch";
+    replay["program_name"] = trace_file_name(impl_->trace_format, prog);
     replay["program_info"] = {
         {"name", impl_->program_name},
         {"version", impl_->program_version},
@@ -1356,7 +1374,7 @@ void Compiler::write_replay_json() {
     // Write the inputs index file (same format as compiler's inputs.cbor)
     {
         json inputs_index;
-        inputs_index["program_name"] = prog + ".fhetch";
+        inputs_index["program_name"] = trace_file_name(impl_->trace_format, prog);
         // input_count is re-set below after filtering out key-named captures.
         inputs_index["input_format"] = "cereal_binary";
         inputs_index["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
@@ -1409,7 +1427,7 @@ void Compiler::write_replay_json() {
     // Write the outputs file (same format as compiler's outputs.cbor)
     {
         json outputs_data;
-        outputs_data["program_name"] = prog + ".fhetch";
+        outputs_data["program_name"] = trace_file_name(impl_->trace_format, prog);
         outputs_data["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         json outputs_arr = json::array();

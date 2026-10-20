@@ -107,7 +107,7 @@ static bool load_source_outputs(const fs::path& source_dir,
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr
-            << "Usage: " << argv[0] << " <trace.fhetch>\n"
+            << "Usage: " << argv[0] << " <trace.fhex|trace.fhetch>\n"
             << "           [--ring-dim N]       # default 65536 (2^16)\n"
             << "           [--source-dir DIR]   # primary workload dir\n"
             << "           [--cc FILE]          # crypto context (.bin)\n"
@@ -183,7 +183,7 @@ int main(int argc, char* argv[]) {
     niobium::compiler().init(fwd_argc, fwd_argv);
     niobium::compiler().set_program_info(
         "fhetch_driver", "1.0",
-        "Re-drive a .fhetch trace through the FHETCH API");
+        "Re-drive a .fhex or .fhetch trace through the FHETCH API");
     niobium::compiler().set_build_info(__FILE__, __LINE__, __TIMESTAMP__);
 
     niobium::Compiler::CacheParameters cache_params;
