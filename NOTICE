@@ -2,7 +2,7 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 ============================================================
 
 Project: niobium-fhetch
-Generated: 2026-10-16
+Generated: 2026-10-22
 Tool: SCANOSS (snippet detection with License dataset)
 Components: 73
 
@@ -470,7 +470,6 @@ COMPONENT ATTRIBUTIONS
     Copyright 2008 ; Google Inc.
     Copyright 2012-2016 Free Software Foundation Inc
     Copyright 2014 gperftools Contributors
-    Copyright 2023 gperftools Contributors
     Copyright 2026 gperftools Contributors
     Copyright (c) 2000; Google Inc.
     Copyright (c) 2003; Google Inc.
@@ -483,6 +482,7 @@ COMPONENT ATTRIBUTIONS
     Copyright (c) 2013; Google Inc.
     Copyright (c) 2021; IBM Ltd.
     Copyright (c) 2021; gperftools Contributors
+    Copyright (c) 2023; gperftools Contributors
     Copyright (c) 2024; gperftools Contributors
     Copyright 1994; 1995; 1996; 1999; 2000; 2001; 2002 Free Software
     Copyright 1994; 1995; 1996; 1999; 2000; 2001; 2002 Free Software Foundation; Inc.
@@ -824,20 +824,19 @@ COMPONENT ATTRIBUTIONS
   License: EPL-2.0
 
   nurikit
-  Version: v0.1.0a14.post0
-  Source: https://github.com/seoklab/nurikit
-  PURL: pkg:github/seoklab/nurikit
+  Version: 0.1.0a14.post0
+  Source: https://pypi.org/project/nurikit
+  PURL: pkg:pypi/nurikit
   Copyright:
     Copyright 2017 Google Inc
     Copyright 2007; Google Inc.
   License: Apache-2.0
 
   nurikit
-  Version: 0.1.0a14.post0
-  Source: https://pypi.org/project/nurikit
-  PURL: pkg:pypi/nurikit
+  Version: v0.1.0a14.post0
+  Source: https://github.com/seoklab/nurikit
+  PURL: pkg:github/seoklab/nurikit
   Copyright:
-    Copyright 2017 Google Inc
     Copyright 2007; Google Inc.
   License: Apache-2.0
 
