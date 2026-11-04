@@ -1345,6 +1345,18 @@ bool write_ciphertext_input_bin(
     return write_ciphertext_input_files(name, ct, addr_ids);
 }
 
+// An input declared without its words: the .ids (its addresses, as for any
+// input) and an empty .bin. Whoever runs the program supplies the words.
+bool write_declared_input(const std::string& name, const std::vector<uint64_t>& addr_ids) {
+    auto dir = niobium::compiler().get_program_directory();
+    std::filesystem::create_directories(dir);
+    std::string prog = niobium::compiler().program_name();
+    auto ids_path = dir / (prog + ".input_" + name + ".ids");
+    if (!niobium::cereal_io::write_addr_ids(ids_path, addr_ids)) return false;
+    std::ofstream bin(dir / (prog + ".input_" + name + ".bin"), std::ios::binary | std::ios::trunc);
+    return bin.good();
+}
+
 bool load_plaintext_input_file(const std::string& name) {
     return load_plaintext_input_file_impl(niobium::compiler(), name);
 }
