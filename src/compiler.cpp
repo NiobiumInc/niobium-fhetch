@@ -1336,8 +1336,7 @@ void Compiler::write_replay_json() {
         inputs_index["program_name"] = prog + ".fhetch";
         // input_count is re-set below after filtering out key-named captures.
         inputs_index["input_format"] = "cereal_binary";
-        inputs_index["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        inputs_index["timestamp"] = recorded_clock_ms() / 1000;
         json inputs_arr = json::array();
         for (const auto& input : impl_->captured_inputs) {
             // Eval keys are captured in m_captured_inputs (for data capture) but
@@ -1387,8 +1386,7 @@ void Compiler::write_replay_json() {
     {
         json outputs_data;
         outputs_data["program_name"] = prog + ".fhetch";
-        outputs_data["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        outputs_data["timestamp"] = recorded_clock_ms() / 1000;
         json outputs_arr = json::array();
         for (const auto& output : impl_->captured_outputs) {
             json out_entry;
@@ -1466,8 +1464,7 @@ void Compiler::write_replay_json() {
     if (!key_start.empty())
         replay["key_start_addr_ids"] = key_start;
 
-    replay["generated_timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
+    replay["generated_timestamp"] = recorded_clock_ms();
 
     std::ofstream out(path);
     if (out.is_open()) {

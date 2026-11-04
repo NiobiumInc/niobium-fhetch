@@ -18,8 +18,21 @@
 #include <vector>
 #include <unordered_map>
 #include <utility>
+#include <cstdlib>
 
 namespace niobium {
+
+uint64_t recorded_clock_ms() {
+    if (const char* e = std::getenv("SOURCE_DATE_EPOCH"); e != nullptr && *e != '\0') {
+        char* end = nullptr;
+        const unsigned long long s = std::strtoull(e, &end, 10);
+        if (end != e && *end == '\0') return static_cast<uint64_t>(s) * 1000;
+    }
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count());
+}
+
 
 TraceWriter::TraceWriter() {
     // Reserve index 0 for the copy/zero-init sentinel modulus.
@@ -165,10 +178,7 @@ std::filesystem::path TraceWriter::write(const std::filesystem::path& directory,
     metadata.source_file = source_file_;
     metadata.source_line = source_line_;
     metadata.build_timestamp = build_timestamp_;
-    metadata.generated_timestamp = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    metadata.generated_timestamp = recorded_clock_ms();
 
     fhetch::Program program;
     program.metadata = std::move(metadata);
