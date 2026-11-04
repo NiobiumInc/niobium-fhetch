@@ -17,6 +17,12 @@
 
 namespace niobium {
 
+// The wall clock a project's files record (the trace's Generated line, the
+// timestamps of the inputs, outputs and replay indexes), in milliseconds since
+// the epoch. SOURCE_DATE_EPOCH (seconds), when set, replaces the clock, so that
+// two recordings of the same program are byte-identical.
+uint64_t recorded_clock_ms();
+
 class TraceWriter {
 public:
     TraceWriter();
