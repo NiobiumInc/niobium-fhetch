@@ -168,6 +168,10 @@ void openfhe_cporbe_with_openmp(bool /*with_openmp*/) {
 
 #include "compiler_internal.h"
 
+// Binding record capture (docs/BINDING_RECORD.md): each tagged input, probed
+// output and the client's keys, with the addresses their towers got.
+#include "binding_capture.h"
+
 namespace niobium {
 
 // Forward-declare the tag_bootstrap_precompute<CryptoContext> specialization
@@ -410,6 +414,7 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
     // Collect addr_ids and in-memory data
     std::vector<uint64_t> addr_ids;
     capture_ciphertext_polys(*this, input_name, ct, addr_ids);
+    detail::capture_binding_input(input_name, ct);
 
     write_ciphertext_input_files(input_name, ct, addr_ids);
 
@@ -621,6 +626,8 @@ void Compiler::probe<lbcrypto::Ciphertext<DCRTPoly>>(
                                /*starts_new_element=*/false, fhetch_addr, modulus);
         }
     }
+
+    detail::capture_binding_output(var_name, ct);
 
     // Save ciphertext template for result reconstruction after replay.
     // The template preserves the ciphertext structure (params, format, etc.)
@@ -855,7 +862,7 @@ static void serialize_eval_keys(
 
 template<>
 void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
-    const lbcrypto::CryptoContext<DCRTPoly>& /*cc*/) {
+    const lbcrypto::CryptoContext<DCRTPoly>& cc) {
     auto dir = get_program_directory();
     std::filesystem::create_directories(dir);
     std::string prog = program_name();
@@ -901,6 +908,8 @@ void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
                 set_key_start_addr_id("evalautomorphism", rk_addr_ids[0]);
         }
     } catch (...) {}
+
+    detail::capture_binding_keys(cc);
 
     std::cout << "[NIOBIUM] Tagged " << total << " key polynomials for replay" << std::endl;
 }

@@ -568,6 +568,7 @@ void clear_recording_registries() noexcept;
 
 void Compiler::reset() {
     detail::clear_recording_registries();
+    detail::clear_binding_capture();
     impl_->captured_inputs.clear();
     impl_->captured_input_index.clear();
     impl_->captured_outputs.clear();
@@ -1450,6 +1451,13 @@ void Compiler::write_replay_json() {
             out_out.close();
         }
     }
+
+    // Binding record and output metadata (docs/BINDING_RECORD.md), so data from
+    // a client that never ran the program (a labelled NBBF upload) can be bound
+    // by label instead of by .ids position, and results rebuilt.
+    const auto binding_files = detail::write_binding_files(dir, prog);
+    if (!binding_files.binding_record.empty()) files["binding_record"] = binding_files.binding_record;
+    if (!binding_files.output_metadata.empty()) files["output_metadata"] = binding_files.output_metadata;
 
     // Key file references. Relative to the project directory (like every
     // other entry) so the project stays relocatable: replay hosts resolve

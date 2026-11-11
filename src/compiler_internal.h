@@ -10,6 +10,7 @@
 #include "niobium/compiler.h"
 #include "trace_writer.h"
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <unordered_set>
@@ -75,6 +76,21 @@ void sync_fhetch_state_to_compiler();
 /// probe entry point openfhe_cprobe_save_dcrt_poly in probes.cpp delegates
 /// here.
 void save_dcrt_poly_as_input(const void* dcrt_poly_ptr);
+
+/// The files write_binding_files wrote, relative to its directory; empty
+/// for one it did not write.
+struct BindingFiles {
+    std::string binding_record;   ///< <prog>.nbbr
+    std::string output_metadata;  ///< <prog>.nbom
+};
+
+/// Writes the recording's binding record and output metadata
+/// (docs/BINDING_RECORD.md), captured as inputs, outputs and keys were tagged
+/// (binding_capture.h), into `dir`. Each is written only when it has content;
+/// a failure warns and leaves that name empty. Defined in binding_capture.cpp,
+/// so this file stays free of OpenFHE headers.
+BindingFiles write_binding_files(const std::filesystem::path& dir, const std::string& prog);
+void clear_binding_capture();
 
 /// Iterate captured inputs, once per record (shape + addr_ids +
 /// per-residue values).

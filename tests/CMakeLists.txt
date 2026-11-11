@@ -133,3 +133,29 @@ set_openfhe_rpath(ntt_omega_test)
 add_executable(replay_out_test replay_out/test.cpp)
 target_link_libraries(replay_out_test PRIVATE niobium_fhetch)
 set_openfhe_rpath(replay_out_test)
+
+# ==============================================================================
+# Binding record (.nbbr) and output metadata (.nbom) formats. C++17, no
+# dependencies: always built.
+# ==============================================================================
+
+add_executable(binding_formats_test binding_record/formats_test.cpp)
+target_link_libraries(binding_formats_test PRIVATE nbfhetch_formats)
+
+# ==============================================================================
+# The recorder writes the binding record and output metadata next to the trace.
+# ==============================================================================
+
+add_executable(binding_capture_test binding_capture/test.cpp)
+target_link_libraries(binding_capture_test PRIVATE niobium_fhetch)
+target_include_directories(binding_capture_test PRIVATE "${CMAKE_SOURCE_DIR}/src" ${JSON_INCLUDE_DIR})
+set_openfhe_rpath(binding_capture_test)
+
+# ==============================================================================
+# Bind and output limbs (needs NIOBIUM_FHETCH_WITH_NBBF). C++20, no OpenFHE.
+# ==============================================================================
+
+if(TARGET nbfhetch_binding)
+  add_executable(binding_bind_test binding_record/bind_test.cpp)
+  target_link_libraries(binding_bind_test PRIVATE nbfhetch_binding)
+endif()
