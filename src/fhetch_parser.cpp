@@ -17,8 +17,7 @@
 #include "niobium/fhetch_parser.h"
 #include "niobium/fhetch_api.h"
 #include "niobium/fhetch_reader.h"
-#include "niobium/compiler.h"
-#include "compiler_internal.h"
+#include "niobium/fhetch_recording.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -52,12 +51,12 @@ struct Driver {
 
     // Get-or-create a source polynomial. Reads before writes are treated as
     // live-in inputs: if the caller supplied real values for the address via
-    // DriveInputs, we use those AND go straight to the Compiler's
-    // store_input_element() so the known (values, modulus) pair lands in
-    // captured_inputs at the Polynomial's synthetic FHETCH address. If no
+    // DriveInputs, we use those AND tag the known (values, modulus) pair as is
+    // (recording::tag_input_values), so a recorder stores it at the
+    // Polynomial's synthetic FHETCH address ahead of the other inputs. If no
     // caller-provided data is available, fall back to a zero-filled
-    // placeholder tagged via the normal tag_input() path — whose sync hook
-    // infers the modulus from the first sr_* op that uses the address.
+    // placeholder tagged via the normal tag_input() path — whose modulus a
+    // recorder infers from the first sr_* op that uses the address.
     Polynomial& get_or_create_src(uint64_t file_addr) {
         auto it = polys.find(file_addr);
         if (it != polys.end()) return it->second;
@@ -66,10 +65,8 @@ struct Driver {
         if (in_it != inputs.data.end() && !in_it->second.values.empty()) {
             auto p = Polynomial::from_data(in_it->second.values, ring_dim,
                                           Format::Evaluation);
-            niobium::compiler().store_input_element(
-                "in_" + std::to_string(file_addr), niobium::CapturedKind::SRP,
-                /*starts_new_element=*/false, niobium::detail::polynomial_address(p),
-                in_it->second.modulus, in_it->second.values);
+            recording::tag_input_values("in_" + std::to_string(file_addr), p,
+                                        in_it->second.modulus, in_it->second.values);
             stats.inputs_materialized++;
             auto [ins, _] = polys.emplace(file_addr, std::move(p));
             return ins->second;

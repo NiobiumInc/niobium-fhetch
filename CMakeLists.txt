@@ -103,20 +103,36 @@ set(JSON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/json/single_include"
 # Library sources
 # ==============================================================================
 
-set(LIB_SOURCES
-    src/auto_facade.cpp
-    src/compiler.cpp
+# The recorder-free core: the trace format, the IR builder and the simulator.
+# No niobium::compiler(), no OpenFHE scheme code, no cprobe hooks (the
+# simulator uses OpenFHE's math library only).
+set(CORE_SOURCES
     src/fhetch_api.cpp
     src/fhetch_encoding.cpp
     src/fhetch_parser.cpp
     src/fhetch_reader.cpp
     src/fhetch_writer.cpp
     src/fhetch_sim/simulator.cpp
-    src/binding_capture.cpp
-    src/local_replay.cpp
-    src/probes.cpp
     src/trace_writer.cpp
 )
+
+# The recorder: the session API niobium::compiler(), the OpenFHE auto-facade,
+# the cprobe hooks, the binding record capture and local replay.
+set(RECORDER_SOURCES
+    src/auto_facade.cpp
+    src/binding_capture.cpp
+    src/compiler.cpp
+    src/fhetch_sync.cpp
+    src/local_replay.cpp
+    src/probes.cpp
+)
+
+# OpenFHE's math library alone (what the simulator uses).
+if(NIOBIUM_FHETCH_OPENFHE_STATIC)
+  set(OPENFHE_CORE_LIBRARY OPENFHEcore_static)
+else()
+  set(OPENFHE_CORE_LIBRARY OPENFHEcore)
+endif()
 
 # ==============================================================================
 # Binding record (.nbbr) and output metadata (.nbom) formats
@@ -143,10 +159,52 @@ target_include_directories(nbfhetch_formats PUBLIC
     $<INSTALL_INTERFACE:include>)
 
 # ==============================================================================
+# Recorder-free core (nbfhetch_core)
+# ==============================================================================
+#
+# Compiled once, as objects: they make up the static nbfhetch_core (installed
+# for find_package(NiobiumFhetchCore), so a recorder elsewhere can link the IR
+# builder without a second niobium::compiler()), and they are compiled into
+# libnbfhetch itself, which therefore holds exactly what it held before and one
+# copy of the IR builder's process-wide state.
+
+add_library(nbfhetch_core_objects OBJECT ${CORE_SOURCES})
+set_target_properties(nbfhetch_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_features(nbfhetch_core_objects PUBLIC cxx_std_17)
+target_include_directories(nbfhetch_core_objects
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/fhetch_sim
+        ${JSON_INCLUDE_DIR}
+        ${OPENFHE_INCLUDE_DIRS})
+# The same definition libnbfhetch is compiled with, so the OpenFHE headers the
+# simulator includes expand identically in both; it adds no hook reference
+# there (tests/fhetch_core checks the core's undefined symbols).
+target_compile_definitions(nbfhetch_core_objects PRIVATE OPENFHE_CPROBES)
+target_link_libraries(nbfhetch_core_objects PUBLIC nbfhetch_formats)
+
+add_library(nbfhetch_core STATIC $<TARGET_OBJECTS:nbfhetch_core_objects>)
+add_library(Niobium::fhetch_core ALIAS nbfhetch_core)
+set_target_properties(nbfhetch_core PROPERTIES
+    OUTPUT_NAME "nbfhetch_core"
+    EXPORT_NAME "fhetch_core"
+    POSITION_INDEPENDENT_CODE ON
+)
+target_compile_features(nbfhetch_core PUBLIC cxx_std_17)
+target_include_directories(nbfhetch_core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+find_package(Threads REQUIRED)
+target_link_directories(nbfhetch_core PUBLIC $<BUILD_INTERFACE:${OPENFHE_LIBRARY_PATH}>)
+target_link_libraries(nbfhetch_core PUBLIC nbfhetch_formats ${OPENFHE_CORE_LIBRARY} Threads::Threads)
+
+# ==============================================================================
 # Library target
 # ==============================================================================
 
-add_library(niobium_fhetch ${LIB_SOURCES})
+# The core's objects plus the recorder (see above for why not the archive).
+add_library(niobium_fhetch ${RECORDER_SOURCES} $<TARGET_OBJECTS:nbfhetch_core_objects>)
 add_library(Niobium::fhetch ALIAS niobium_fhetch)
 
 # Output name: libnbfhetch.so / libnbfhetch.a
@@ -176,7 +234,6 @@ endforeach()
 # Enable OPENFHE_CPROBES so the instrumented branch activates probes
 target_compile_definitions(niobium_fhetch PUBLIC OPENFHE_CPROBES)
 
-find_package(Threads REQUIRED)
 target_link_libraries(niobium_fhetch PRIVATE Threads::Threads)
 target_link_libraries(niobium_fhetch PUBLIC nbfhetch_formats)
 
@@ -265,6 +322,8 @@ endfunction()
 # find_package(NiobiumFhetchFormats): Niobium::fhetch_formats, C++17, no deps.
 # NiobiumFhetch depends on it (niobium_fhetch links it PUBLIC).
 niobium_install_package(NiobiumFhetchFormats nbfhetch_formats)
+# find_package(NiobiumFhetchCore): Niobium::fhetch_core, the recorder-free core.
+niobium_install_package(NiobiumFhetchCore nbfhetch_core)
 niobium_install_package(NiobiumFhetch niobium_fhetch)
 
 # Every public header but binding.h, which needs nbbf and is installed with

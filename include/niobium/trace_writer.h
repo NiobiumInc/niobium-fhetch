@@ -1,11 +1,13 @@
 // Copyright 2024-present Niobium Microsystems, Inc.
 // Licensed under the Apache License, Version 2.0.
 //
-// Internal trace writer — records FHETCH operations and writes .fhetch files.
+// Trace writer — records FHETCH operations and writes .fhex / .fhetch files.
+// Part of the recorder-free core (nbfhetch_core): the IR builder records into
+// one process-wide instance, niobium::detail::trace_writer()
+// (niobium/fhetch_recording.h), which a recorder starts, stops and writes.
 
 #pragma once
 
-#include "niobium/compiler.h"
 #include "niobium/fhetch_ir.h"
 
 #include <cstdint>
@@ -22,6 +24,15 @@ namespace niobium {
 // the epoch. SOURCE_DATE_EPOCH (seconds), when set, replaces the clock, so that
 // two recordings of the same program are byte-identical.
 uint64_t recorded_clock_ms();
+
+/// Which serialization of the recorded trace to write.
+///
+/// Selected with `--trace-format=<text|binary|both>` on the CLI consumed by
+/// init(); Binary is the default. The two forms describe the same program:
+/// the binary one (`.fhex`) is smaller and faster to read, the text one
+/// (`.fhetch`) is human-readable. Readers tell them apart by content, not
+/// by file name.
+enum class TraceFormat : uint8_t { Text, Binary, Both };
 
 class TraceWriter {
 public:

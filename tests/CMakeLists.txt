@@ -135,6 +135,16 @@ target_link_libraries(replay_out_test PRIVATE niobium_fhetch)
 set_openfhe_rpath(replay_out_test)
 
 # ==============================================================================
+# The recorder-free core on its own: linked against nbfhetch_core only, so it
+# links only if the core needs no niobium::compiler(). check_symbols.py (run by
+# `make test-fhetch-core[-release]`) checks the archive's symbols as well.
+# ==============================================================================
+
+add_executable(fhetch_core_test fhetch_core/test.cpp)
+target_link_libraries(fhetch_core_test PRIVATE nbfhetch_core)
+set_openfhe_rpath(fhetch_core_test)
+
+# ==============================================================================
 # Binding record (.nbbr) and output metadata (.nbom) formats. C++17, no
 # dependencies: always built.
 # ==============================================================================

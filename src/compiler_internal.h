@@ -8,7 +8,8 @@
 #pragma once
 
 #include "niobium/compiler.h"
-#include "trace_writer.h"
+#include "niobium/fhetch_recording.h"
+#include "niobium/trace_writer.h"
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -23,15 +24,8 @@ namespace niobium::detail {
 using niobium::CapturedInputRecord;
 using niobium::CapturedShape;
 
-/// Get the global TraceWriter instance (owned by the Compiler singleton).
-TraceWriter& trace_writer();
-
-/// Hardware data-format toggles parsed by Compiler::init()
-/// (--montgomery / --bit_reversal / --niobium_hw). Read by fhetch_api.cpp
-/// to select Montgomery-form immediates and the hardware switchmodulus
-/// lowering, and by store_input_element's callers/tests.
-bool montgomery_mode();
-bool bit_reversal_mode();
+// trace_writer(), montgomery_mode(), bit_reversal_mode() and
+// polynomial_address(): niobium/fhetch_recording.h (the IR builder's core).
 
 /// Look up the FHETCH address for an OpenFHE polynomial ID.
 /// Returns (uint64_t)-1 if not found.
@@ -113,6 +107,5 @@ namespace niobium::detail {
 /// Used by translation units (e.g. fhetch_parser.cpp) that need to call
 /// Compiler::store_input_element with the Polynomial's own address without
 /// reaching into PolynomialImpl's internal layout.
-uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p);
 
 }  // namespace niobium::detail

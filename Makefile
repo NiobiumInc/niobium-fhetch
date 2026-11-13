@@ -411,6 +411,15 @@ test-ntt-omega-release: build-release ## Caller-chosen NTT roots: record, valida
 	$(call set-build-config,Release,build)
 	$(BUILD_DIR)/tests/ntt_omega_test
 
+# The core's archive, and libnbfhetch as the scan's control (.dylib or .so).
+FHETCH_CORE_LIB = $(BUILD_DIR)/libnbfhetch_core.a
+FHETCH_RECORDER_LIB = $(firstword $(wildcard $(BUILD_DIR)/libnbfhetch.dylib $(BUILD_DIR)/libnbfhetch.so))
+
+test-fhetch-core-release: build-release ## The recorder-free core alone: run linked to it only, and its symbols reference no Compiler or hook (Release)
+	$(call set-build-config,Release,build)
+	$(BUILD_DIR)/tests/fhetch_core_test
+	python3 tests/fhetch_core/check_symbols.py $(FHETCH_CORE_LIB) $(FHETCH_RECORDER_LIB)
+
 test-binding-formats-release: build-release ## Binding record + output metadata formats: round trip, layout, validation (Release)
 	$(call set-build-config,Release,build)
 	$(BUILD_DIR)/tests/binding_formats_test
@@ -448,6 +457,7 @@ test-release: \
     test-roundtrip-plaintext-add-release \
     test-ntt-omega-release \
     test-replay-out-release \
+    test-fhetch-core-release \
     test-binding-formats-release \
     test-binding-capture-release  ## Run all currently-passing Release tests
 

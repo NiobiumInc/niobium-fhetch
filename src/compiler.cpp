@@ -6,7 +6,8 @@
 #include "niobium/fhetch_api.h"
 #include "niobium/fhetch_sim/simulator.h"
 #include "compiler_internal.h"
-#include "trace_writer.h"
+#include "niobium/fhetch_recording.h"
+#include "niobium/trace_writer.h"
 #include "niobium/checks.h"
 
 #include <cassert>
@@ -53,7 +54,10 @@ namespace niobium {
 // ============================================================================
 
 struct Compiler::Impl {
-    TraceWriter trace_writer;
+    // The IR builder's process-wide writer (fhetch_recording.h): the IR
+    // builder records into it, the Compiler starts, stops and writes it.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members): Impl is never copied or assigned; the IR builder owns this state
+    TraceWriter& trace_writer = detail::trace_writer();
 
     // Program metadata
     std::string program_name;
@@ -108,8 +112,11 @@ struct Compiler::Impl {
     // hardware-izes inputs/immediates/switchmodulus blocks itself. The
     // Niobium hardware convention is both together; partial combinations
     // are rejected at replay().
-    bool montgomery_mode = false;
-    bool bitrev_mode = false;
+    // The IR builder reads these (fhetch_recording.h), so they live there.
+    // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members): Impl is never copied or assigned; the IR builder owns this state
+    bool& montgomery_mode = detail::recording_modes().montgomery;
+    bool& bitrev_mode = detail::recording_modes().bit_reversal;
+    // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
     // Cooperative auto-tagging (set by enable_auto_tagging()). When true,
     // replay() refreshes stale inputs from the manifest and dispatches a
@@ -562,7 +569,7 @@ void Compiler::set_post_recording_hook(std::function<void()> fn) {
 }
 
 namespace detail {
-// Defined in fhetch_api.cpp; clears TU-static recording state.
+// Defined in fhetch_sync.cpp; clears the IR builder's recording state.
 void clear_recording_registries() noexcept;
 }  // namespace detail
 
@@ -1702,23 +1709,3 @@ void for_each_captured_output(
 
 }  // namespace niobium::detail
 
-// ============================================================================
-// Internal accessor for TraceWriter — used by fhetch_api.cpp and probes.cpp.
-// ============================================================================
-
-namespace niobium::detail {
-
-TraceWriter& trace_writer() {
-    auto& impl = niobium::compiler_impl(niobium::compiler());
-    return impl.trace_writer;
-}
-
-bool montgomery_mode() {
-    return niobium::compiler_impl(niobium::compiler()).montgomery_mode;
-}
-
-bool bit_reversal_mode() {
-    return niobium::compiler_impl(niobium::compiler()).bitrev_mode;
-}
-
-}  // namespace niobium::detail
