@@ -33,7 +33,9 @@
  * error rather than a truncation — the previous reader truncated into
  * `uint32_t` and produced a different, valid-looking operand. A line whose
  * opcode is unknown is a warning and is skipped, which is what a
- * forward-compatible reader should do.
+ * forward-compatible reader should do. So is a line with a malformed operand
+ * (an address that is not `%<N>`, a modulus that is not `m=<N>`): the line is
+ * skipped with a warning naming the token, never dropped silently.
  */
 
 #pragma once

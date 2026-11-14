@@ -421,6 +421,138 @@ bool test_coeff_index_is_read_by_name() {
     return g_checks_failed == before;
 }
 
+/// A line whose operand token is malformed is skipped with one warning that
+/// names the token and the line; it never vanishes silently.
+bool test_malformed_operands_are_reported() {
+    std::cout << "\n[test] malformed address and modulus operands are reported"
+              << std::endl;
+    const int before = g_checks_failed;
+
+    // `with_table` puts the table on lines 1-3, so the instruction is line 4.
+    constexpr int kInstructionLine = 4;
+    struct Case {
+        const char* line;
+        const char* message;
+    };
+    const Case cases[] = {
+        // The two repro lines: a bare number where an address belongs, and a
+        // `q=` where the modulus belongs.
+        {"sr_mulp %17, %17, 0, m=1",
+         "malformed address operand '0', expected %<N>, line skipped"},
+        {"sr_mulp %17, %17, %17, q=1",
+         "malformed modulus operand 'q=1', expected m=<N>, line skipped"},
+        {"sr_addp %-1, %1, %2, m=1",
+         "malformed address operand '%-1', expected %<N>, line skipped"},
+        {"sr_addp %3, %x, %2, m=1",
+         "malformed address operand '%x', expected %<N>, line skipped"},
+        {"sr_addp %3, %1, %2, m=",
+         "malformed modulus operand 'm=', expected m=<N>, line skipped"},
+        {"sr_addp_ni %5, %1, 2",
+         "malformed address operand '2', expected %<N>, line skipped"},
+        {"sr_mulps_ni %5, 1, 2.5",
+         "malformed address operand '1', expected %<N>, line skipped"},
+        {"sr_ft %6, x5",
+         "malformed address operand 'x5', expected %<N>, line skipped"},
+        {"sr_mulps %4, %3, 12, q=1",
+         "malformed modulus operand 'q=1', expected m=<N>, line skipped"},
+        {"sr_negp %7, %6, q=1",
+         "malformed modulus operand 'q=1', expected m=<N>, line skipped"},
+        {"sr_ntt %9, %8, q=1",
+         "malformed modulus operand 'q=1', expected m=<N>, line skipped"},
+        {"sr_automorph_eval %10, %9, m=x, k=65",
+         "malformed modulus operand 'm=x', expected m=<N>, line skipped"},
+        {"sr_automorph_coeff %11, %10, k=3, m=x",
+         "malformed modulus operand 'm=x', expected m=<N>, line skipped"},
+        {"sr_rot_automorph_coeff %12, %11, offset=2, m=",
+         "malformed modulus operand 'm=', expected m=<N>, line skipped"},
+    };
+    for (const auto& c : cases) {
+        const auto r = read_fhetch_text(with_table(std::string(c.line) + "\n"));
+        std::cout << "  line: " << c.line << "\n    ok=" << r.ok
+                  << " instructions=" << r.program.instructions.size()
+                  << " warnings=" << r.warnings.size() << std::endl;
+        for (const auto& w : r.warnings)
+            std::cout << "    warning line " << w.line_number << ": " << w.message
+                      << std::endl;
+        CHECK(r.ok);
+        CHECK(r.program.instructions.empty());
+        CHECK(r.errors.empty());
+        CHECK(r.warnings.size() == 1);
+        if (r.warnings.size() != 1) continue;
+        CHECK(r.warnings[0].line_number == kInstructionLine);
+        CHECK(r.warnings[0].message == c.message);
+    }
+
+    // A well-formed line around a malformed one still reads, and the warning
+    // carries the malformed line's own number.
+    const auto mixed = read_fhetch_text(with_table(
+        "sr_addp %3, %1, %2, m=1\n"
+        "sr_mulp %17, %17, 0, m=1\n"
+        "halt\n"));
+    CHECK(mixed.ok);
+    CHECK(mixed.program.instructions.size() == 2);
+    CHECK(mixed.warnings.size() == 1);
+    if (mixed.warnings.size() == 1)
+        CHECK(mixed.warnings[0].line_number == kInstructionLine + 1);
+
+    // A named operand that is not a modulus is still skipped without comment.
+    const auto extra = read_fhetch_text(with_table(
+        "sr_automorph_coeff %3, %2, k=7, m=1, mask=2047\n"));
+    CHECK(extra.ok);
+    CHECK(extra.warnings.empty());
+    CHECK(extra.program.instructions.size() == 1);
+    const auto extra_eval = read_fhetch_text(with_table(
+        "sr_automorph_eval %4, %3, k=65, m=1, offset=2\n"));
+    CHECK(extra_eval.ok);
+    CHECK(extra_eval.warnings.empty());
+    CHECK(extra_eval.program.instructions.size() == 1);
+
+    return g_checks_failed == before;
+}
+
+/// Digits too wide for `uint64_t` are an error, like an address above
+/// `kMaxAddress`, not a skipped line with a warning.
+bool test_overflowing_digits_are_errors() {
+    std::cout << "\n[test] overflowing address and modulus digits are errors"
+              << std::endl;
+    const int before = g_checks_failed;
+
+    struct Case {
+        const char* line;
+        const char* message;
+    };
+    const Case cases[] = {
+        {"sr_addp %18446744073709551616, %1, %2, m=1",
+         "address %18446744073709551616 exceeds the 4294967295 an instruction "
+         "can hold"},
+        {"sr_addp %4294967296, %1, %2, m=1",
+         "address %4294967296 exceeds the 4294967295 an instruction can hold"},
+        {"sr_addp %3, %1, %2, m=18446744073709551616",
+         "modulus 18446744073709551616 exceeds the 64 bits a modulus can hold"},
+    };
+    for (const auto& c : cases) {
+        const auto r = read_fhetch_text(with_table(std::string(c.line) + "\n"));
+        std::cout << "  line: " << c.line << "\n    ok=" << r.ok
+                  << " errors=" << r.errors.size()
+                  << " warnings=" << r.warnings.size() << std::endl;
+        CHECK(!r.ok);
+        CHECK(r.program.instructions.empty());
+        CHECK(r.warnings.empty());
+        CHECK(r.errors.size() == 1);
+        if (r.errors.size() != 1) continue;
+        CHECK(r.errors[0].message == c.message);
+    }
+
+    // The largest value that fits is not an overflow.
+    const auto fits = read_fhetch_text(
+        with_table("sr_addp %3, %1, %2, m=18446744073709551615\n"));
+    CHECK(fits.ok);
+    CHECK(fits.warnings.empty());
+    CHECK(fits.program.instructions.size() == 1);
+
+    return g_checks_failed == before;
+}
+
 }  // namespace
 
 int main() {
@@ -441,6 +573,8 @@ int main() {
     if (test_addresses_are_not_ssa()) passed++; else failed++;
     if (test_reads_either_serialization()) passed++; else failed++;
     if (test_coeff_index_is_read_by_name()) passed++; else failed++;
+    if (test_malformed_operands_are_reported()) passed++; else failed++;
+    if (test_overflowing_digits_are_errors()) passed++; else failed++;
 
     std::cout << "\n========================================" << std::endl;
     std::cout << "Results: " << passed << " passed, " << failed << " failed"

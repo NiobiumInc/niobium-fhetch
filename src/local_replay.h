@@ -9,9 +9,11 @@
 
 #include "niobium/fhetch_parser.h"  // DriveInputs
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,12 +21,26 @@ namespace niobium {
 
 // Drive the simulator over the on-disk project at `dir` and write
 // fhetch_replay_outputs.json + serialized_probes/<name>.ct into it. Returns
-// true on a zero-error run that produced at least one probe.
+// true on a zero-error run that wrote the outputs file and, when any output
+// has a ciphertext template, wrote at least one probe in this call. A project
+// with no templates (nothing to reconstruct) returns true with no probes. A
+// run whose outputs file cannot be read back returns false.
 bool run_local_replay_from_project(const std::filesystem::path& dir);
+
+// What one reconstruct_probes_in call did: the outputs with a ciphertext
+// template, and the probes it wrote.
+struct ProbeReconstruction {
+    size_t templates = 0;
+    size_t written = 0;
+};
 
 // Fill ciphertext_templates/<name>.template from fhetch_replay_outputs.json in
 // `dir` and serialize to serialized_probes/<name>.ct (defined in auto_facade.cpp).
-void reconstruct_probes_in(const std::filesystem::path& dir);
+// Returns the counts, or std::nullopt when it did not read the outputs file:
+// the call was re-entered, or the file is missing, cannot be opened, is not
+// JSON or has no "outputs".
+[[nodiscard]] std::optional<ProbeReconstruction> reconstruct_probes_in(
+    const std::filesystem::path& dir);
 
 namespace fhetch {
 

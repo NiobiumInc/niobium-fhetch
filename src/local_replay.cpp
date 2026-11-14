@@ -503,14 +503,22 @@ bool run_local_replay_from_project(const fs::path& dir) {
 
     if (!write_replay_outputs(dir, outputs, sim)) return false;
     if (!register_crypto_context(dir)) return false;
-    reconstruct_probes_in(dir);
-
-    auto probes_dir = dir / "serialized_probes";
-    if (!fs::exists(probes_dir) || fs::is_empty(probes_dir)) {
-        std::cerr << "[fhetch_sim] reconstruction produced no probes in " << probes_dir
-                  << std::endl;
+    const std::optional<ProbeReconstruction> reconstruction = reconstruct_probes_in(dir);
+    if (!reconstruction) {
+        std::cerr << "[fhetch_sim] cannot read back " << dir / "fhetch_replay_outputs.json"
+                  << " to reconstruct probes" << std::endl;
         return false;
     }
+    const ProbeReconstruction& probes = *reconstruction;
+
+    if (probes.written > 0) return true;
+    if (probes.templates > 0) {
+        std::cerr << "[fhetch_sim] reconstruction produced no probes in "
+                  << dir / "serialized_probes" << std::endl;
+        return false;
+    }
+    std::cout << "[fhetch_sim] no ciphertext templates in " << dir
+              << ": outputs written, no probes to reconstruct" << std::endl;
     return true;
 }
 

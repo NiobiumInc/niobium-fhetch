@@ -15,6 +15,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <sstream>
 #include <utility>
 
@@ -34,21 +35,30 @@ std::string_view strip_comma(std::string_view s) {
     return trim(s);
 }
 
+/// Outcome of reading an unsigned integer: digits too large for `uint64_t` are
+/// told apart from text that is not a number.
+enum class UintParse { Ok, Malformed, Overflow };
+
 /// Unsigned integer in any base the text may use. Base 0 accepts `0x` — the
 /// two previous readers disagreed here, one accepting hex and one silently
 /// yielding zero for it, so accepting the superset is the resolution.
-bool to_uint(std::string_view tok, uint64_t& out) {
+UintParse parse_uint(std::string_view tok, uint64_t& out) {
     const std::string s(strip_comma(tok));
-    if (s.empty()) return false;
+    if (s.empty()) return UintParse::Malformed;
     // Reject a leading sign outright: strtoull would accept "-1" and wrap it
     // into a huge address.
-    if (s[0] == '-' || s[0] == '+') return false;
+    if (s[0] == '-' || s[0] == '+') return UintParse::Malformed;
     errno = 0;
     char* end = nullptr;
     const unsigned long long v = std::strtoull(s.c_str(), &end, 0);
-    if (errno == ERANGE || end != s.c_str() + s.size()) return false;
+    if (end != s.c_str() + s.size()) return UintParse::Malformed;
+    if (errno == ERANGE) return UintParse::Overflow;
     out = static_cast<uint64_t>(v);
-    return true;
+    return UintParse::Ok;
+}
+
+bool to_uint(std::string_view tok, uint64_t& out) {
+    return parse_uint(tok, out) == UintParse::Ok;
 }
 
 /// Floating-point immediate, for the non-integer poly-scalar forms.
@@ -64,18 +74,29 @@ bool to_double(std::string_view tok, double& out) {
 }
 
 /// `%N` → N.
-bool to_addr_token(std::string_view tok, uint64_t& out) {
+UintParse parse_addr_token(std::string_view tok, uint64_t& out) {
     const std::string_view s = strip_comma(tok);
-    if (s.empty() || s.front() != '%') return false;
-    return to_uint(s.substr(1), out);
+    if (s.empty() || s.front() != '%') return UintParse::Malformed;
+    return parse_uint(s.substr(1), out);
+}
+
+/// True when the token is spelled as a modulus operand, `m=...`, whether or not
+/// its value parses.
+bool names_modulus(std::string_view tok) {
+    return strip_comma(tok).rfind("m=", 0) == 0;
 }
 
 /// `<prefix>N` → N, e.g. `k=7`, `omega=0x1AB`.
-bool to_named(std::string_view tok, std::string_view prefix, uint64_t& out) {
+UintParse parse_named(std::string_view tok, std::string_view prefix,
+                      uint64_t& out) {
     const std::string_view s = strip_comma(tok);
     if (s.size() <= prefix.size() || s.compare(0, prefix.size(), prefix) != 0)
-        return false;
-    return to_uint(s.substr(prefix.size()), out);
+        return UintParse::Malformed;
+    return parse_uint(s.substr(prefix.size()), out);
+}
+
+bool to_named(std::string_view tok, std::string_view prefix, uint64_t& out) {
+    return parse_named(tok, prefix, out) == UintParse::Ok;
 }
 
 std::string lower(std::string_view s) {
@@ -245,12 +266,23 @@ private:
         result_.program.modulus_table.push_back(value);
     }
 
-    /// An address wide enough to lose bits is refused, not truncated.
+    /// An address wide enough to lose bits, or too wide for `uint64_t`, is
+    /// refused, not truncated. A token that is not `%<N>` skips the line with a
+    /// warning.
     bool address(std::string_view tok, uint32_t& out) {
         uint64_t v = 0;
-        if (!to_addr_token(tok, v)) return false;
-        if (v > kMaxAddress) {
-            error("address %" + std::to_string(v) + " exceeds the " +
+        const UintParse parsed = parse_addr_token(tok, v);
+        if (parsed == UintParse::Malformed) {
+            warn("malformed address operand '" + std::string(strip_comma(tok)) +
+                 "', expected %<N>, line skipped");
+            return false;
+        }
+        if (parsed == UintParse::Overflow || v > kMaxAddress) {
+            const std::string shown =
+                parsed == UintParse::Overflow
+                    ? std::string(strip_comma(tok).substr(1))
+                    : std::to_string(v);
+            error("address %" + shown + " exceeds the " +
                   std::to_string(kMaxAddress) + " an instruction can hold");
             return false;
         }
@@ -258,11 +290,24 @@ private:
         return true;
     }
 
-    /// `m=<N>`. Index when it fits the table, literal prime otherwise — see
-    /// the note on read_fhetch_text().
+    /// `m=<N>`. Index when it fits the table, literal prime otherwise — see the
+    /// note on read_fhetch_text(). A value too wide for `uint64_t` is an error;
+    /// a token that is not `m=<N>` skips the line with a warning.
     bool modulus(std::string_view tok, Instruction& inst) {
         uint64_t v = 0;
-        if (!to_named(tok, "m=", v)) return false;
+        const UintParse parsed = parse_named(tok, "m=", v);
+        if (parsed == UintParse::Malformed) {
+            warn("malformed modulus operand '" + std::string(strip_comma(tok)) +
+                 "', expected m=<N>, line skipped");
+            return false;
+        }
+        if (parsed == UintParse::Overflow) {
+            error("modulus " + std::string(strip_comma(tok).substr(2)) +
+                  " exceeds the " +
+                  std::to_string(std::numeric_limits<uint64_t>::digits) +
+                  " bits a modulus can hold");
+            return false;
+        }
         const size_t table = result_.program.modulus_table.size();
         if (v < table) {
             if (v > kMaxModulusIndex) {
@@ -388,8 +433,10 @@ private:
                     inst.logn = static_cast<uint8_t>(v);
                     continue;
                 }
-                if (modulus(args[i], inst)) { saw_mod = true; continue; }
-                if (!result_.errors.empty()) return false;  // modulus() errored
+                if (names_modulus(args[i])) {
+                    if (!modulus(args[i], inst)) return false;
+                    saw_mod = true;
+                }
             }
             if (!saw_mod) { warn("sr_automorph_eval without a modulus"); return false; }
             return true;
@@ -416,8 +463,10 @@ private:
                     saw_index = true;
                     continue;
                 }
-                if (modulus(args[i], inst)) { saw_mod = true; continue; }
-                if (!result_.errors.empty()) return false;  // modulus() errored
+                if (names_modulus(args[i])) {
+                    if (!modulus(args[i], inst)) return false;
+                    saw_mod = true;
+                }
             }
             if (!saw_index) {
                 warn(std::string("expected ") + std::string(index_name));
