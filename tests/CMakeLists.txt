@@ -79,6 +79,15 @@ target_include_directories(simulator_liveness PRIVATE "${CMAKE_SOURCE_DIR}/src")
 set_openfhe_rpath(simulator_liveness)
 
 # ==============================================================================
+# Exit status of fhetch_sim --project (run_local_replay_from_project).
+# ==============================================================================
+
+add_executable(local_replay_test local_replay/test.cpp)
+target_link_libraries(local_replay_test PRIVATE niobium_fhetch)
+target_include_directories(local_replay_test PRIVATE "${CMAKE_SOURCE_DIR}/src")
+set_openfhe_rpath(local_replay_test)
+
+# ==============================================================================
 # FHETCH IR — opcode vocabulary + instruction. Header-only, no OpenFHE.
 # ==============================================================================
 

@@ -1203,32 +1203,34 @@ static void apply_sim_output(lbcrypto::NativePoly& native_poly, const ComputedEl
     native_poly.SetValues(std::move(nv), fmt);
 }
 
-void reconstruct_probes_in(const std::filesystem::path& dir) {
+std::optional<ProbeReconstruction> reconstruct_probes_in(const std::filesystem::path& dir) {
     // Re-entry guard. The Serial::{De,}SerializeFromFile calls below fire
     // the auto-facade's on_{de,}serialize_ciphertext hooks, which in turn
     // call probe() / ensure_replayed() → back into this code. Use the
     // same thread-local flag probe() uses so the nested calls short-circuit.
-    if (g_in_probe) return;
+    if (g_in_probe) return std::nullopt;
     g_in_probe = true;
     struct Guard { ~Guard() { g_in_probe = false; } } guard;
 
+    ProbeReconstruction counts;
     auto templates_dir = dir / "ciphertext_templates";
     auto serialized_dir = dir / "serialized_probes";
     auto outputs_path = dir / "fhetch_replay_outputs.json";
 
-    if (!std::filesystem::exists(outputs_path)) return;
+    if (!std::filesystem::exists(outputs_path)) return std::nullopt;
     std::filesystem::create_directories(serialized_dir);
 
     // Load the simulator's computed output values
     std::ifstream ifs(outputs_path);
-    if (!ifs.is_open()) return;
+    if (!ifs.is_open()) return std::nullopt;
     nlohmann::json outputs_json = nlohmann::json::parse(ifs, nullptr, false);
-    if (outputs_json.is_discarded() || !outputs_json.contains("outputs")) return;
+    if (outputs_json.is_discarded() || !outputs_json.contains("outputs")) return std::nullopt;
 
     for (const auto& output_entry : outputs_json["outputs"]) {
         std::string name = output_entry.value("name", "");
         auto template_path = templates_dir / (name + ".template");
         if (!std::filesystem::exists(template_path)) continue;
+        ++counts.templates;
 
         lbcrypto::Ciphertext<DCRTPoly> ct;
         if (!lbcrypto::Serial::DeserializeFromFile(template_path.string(), ct, lbcrypto::SerType::BINARY)) {
@@ -1289,16 +1291,18 @@ void reconstruct_probes_in(const std::filesystem::path& dir) {
             auto ct_path = serialized_dir / (name + ".ct");
             if (lbcrypto::Serial::SerializeToFile(ct_path.string(), ct, lbcrypto::SerType::BINARY)) {
                 std::cout << "[NIOBIUM] Serialized probe '" << name << "' to " << ct_path << std::endl;
+                ++counts.written;
             }
         } catch (const std::exception& e) {
             std::cerr << "[NIOBIUM] Failed to fill template for '" << name << "': "
                       << e.what() << std::endl;
         }
     }
+    return counts;
 }
 
 void Compiler::reconstruct_probes() const {
-    reconstruct_probes_in(get_program_directory());
+    (void)reconstruct_probes_in(get_program_directory());
 }
 
 // ============================================================================
