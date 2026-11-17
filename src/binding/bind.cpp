@@ -10,10 +10,12 @@
 /**
  * @file bind.cpp
  * @brief Bind: joins an NBBF upload and its label index with a binding record
- *        (docs/BINDING_RECORD.md, Bind); the output limbs a result writer reads.
+ *        (docs/BINDING_RECORD.md, Bind); and the result, which writes a run's
+ *        outputs back as NBBF (Result).
  */
 #include "niobium/binding.h"
 #include "niobium/binding_record.h"
+#include "niobium/output_metadata.h"
 
 #include <nbbf/label_index.hpp>
 #include <nbbf/nbbf.hpp>
@@ -21,6 +23,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <set>
 #include <span>
@@ -33,12 +36,17 @@ namespace niobium::binding {
 
 namespace {
 
-// The trace consumes residues in evaluation domain, bit-reversed order.
+// The trace consumes and produces residues in evaluation domain, bit-reversed order.
 constexpr nbbf::Domain kDomain = nbbf::Domain::Evaluation;
 constexpr nbbf::Order kOrder = nbbf::Order::BitReversed;
 
+[[noreturn]] void fail_in(const char* what, BindErrc code, const std::string& label, const std::string& message) {
+    throw BindError(code, label,
+                    std::string(what) + ": " + (label.empty() ? std::string() : "'" + label + "': ") + message);
+}
+
 [[noreturn]] void fail(BindErrc code, const std::string& label, const std::string& message) {
-    throw BindError(code, label, "bind: " + (label.empty() ? std::string() : "'" + label + "': ") + message);
+    fail_in("bind", code, label, message);
 }
 
 void reject_output(Kind kind) {
@@ -165,6 +173,54 @@ std::vector<OutputObject> output_limbs(const BindingRecord& record) {
         out.push_back(std::move(o));
     }
     return out;
+}
+
+void write_result(const BindingRecord& record, const OutputMetadata& metadata, const ResidueSource& residues,
+                  const std::filesystem::path& dir) {
+    const auto objects = output_limbs(record);
+
+    // The file declares only the primes the outputs use, in the record's order.
+    std::set<std::uint16_t> used;
+    for (const auto& object : objects)
+        for (const auto& limb : object.limbs) used.insert(limb.modulus_index);
+    std::vector<std::uint16_t> file_index(record.moduli.size(), 0);
+    std::vector<std::uint64_t> moduli;
+    std::vector<std::uint64_t> roots;
+    for (const auto k : used) {
+        file_index[k] = static_cast<std::uint16_t>(moduli.size());
+        moduli.push_back(record.moduli[k]);
+        roots.push_back(record.roots[k]);
+    }
+
+    nbbf::Builder builder(moduli, roots);
+    nbbf::LabelIndexBuilder labels;
+    OutputMetadata result_metadata;
+    std::uint32_t first_poly = 0;
+    for (const auto& object : objects) {
+        const auto* entry = metadata.find(object.label);
+        if (entry == nullptr)
+            fail_in("result", BindErrc::MissingOutputMetadata, object.label,
+                    "the output metadata has no entry of this label");
+        for (const auto& limb : object.limbs) {
+            auto values = residues(limb.address, limb.modulus);
+            if (values.size() != record.ring_dim)
+                fail_in("result", BindErrc::ResidueCountMismatch, object.label,
+                     "big polynomial " + std::to_string(limb.big_poly) + " under modulus " +
+                         std::to_string(limb.modulus) + " has " + std::to_string(values.size()) +
+                         " residues; the record's ring_dim is " + std::to_string(record.ring_dim));
+            builder.add_block(first_poly + limb.big_poly, file_index[limb.modulus_index], std::move(values), kDomain,
+                              kOrder);
+        }
+        labels.add(object.label, first_poly, object.poly_count);
+        first_poly += object.poly_count;
+        result_metadata.entries.push_back(*entry);
+    }
+
+    std::filesystem::create_directories(dir);
+    const auto plan = builder.plan().value();
+    builder.write(dir / "result.nbbf").value();
+    labels.write(dir / "result.nbli", nbbf::header_digest(plan)).value();
+    result_metadata.write(dir / "result.nbom");
 }
 
 }  // namespace niobium::binding

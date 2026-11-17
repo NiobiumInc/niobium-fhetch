@@ -14,7 +14,8 @@
  *
  * Covers every failure and ignore rule of the specification's Bind section, an
  * upload whose moduli are listed in another order (and with an extra prime),
- * the header-region overload, and the output limbs a result writer reads.
+ * the header-region overload, the output limbs, and the result: what it writes
+ * and each of its failures.
  */
 #include "test_util.h"
 
@@ -300,12 +301,78 @@ void test_outputs() {
           "every output limb, in (big_poly, modulus) order, with its prime and address");
 }
 
+// --- Result -----------------------------------------------------------------------
+
+// What a run computed at `address`: kN residues derived from the address.
+std::vector<std::uint64_t> computed_at(std::uint64_t address, std::uint64_t q) {
+    std::vector<std::uint64_t> values(kN);
+    for (std::size_t i = 0; i < values.size(); ++i) values[i] = (address * 5 + i) % q;
+    return values;
+}
+
+void test_result(const std::filesystem::path& tmp) {
+    std::cout << "result\n";
+    const auto rec = make_record();
+    OutputMetadata meta;
+    meta.set({.label = "output:y", .scaling_factor = 0x1p40, .scale_degree = 1, .slots = 2});
+
+    const auto dir = tmp / "result";
+    write_result(rec, meta, computed_at, dir);
+    const auto file = nbbf::MappedFile::open(dir / "result.nbbf").value();
+    const auto index = nbbf::LabelIndex::read(dir / "result.nbli").value();
+    const auto view = file.view();
+    const auto& layout = view.layout();
+    const auto* entry = index.find("output:y");
+    check(index.check_against(view).has_value() && index.entries().size() == 1 && entry != nullptr &&
+              entry->first_poly == 0 && entry->poly_count == 2,
+          "the label index belongs to the file and names output:y, big polynomials 0 and 1");
+    const std::vector<std::uint64_t> moduli(layout.moduli().begin(), layout.moduli().end());
+    const std::vector<std::uint64_t> roots(layout.roots().begin(), layout.roots().end());
+    check(moduli == std::vector<std::uint64_t>{17, 97} && roots == std::vector<std::uint64_t>{rec.roots[0], rec.roots[1]},
+          "only the primes the outputs use, with the record's roots");
+    bool blocks_ok = layout.blocks().size() == 4;
+    const auto outputs = output_limbs(rec);
+    for (const auto& limb : outputs[0].limbs) {
+        const auto block = layout.find_block(limb.big_poly, limb.modulus_index);
+        if (!block) {
+            blocks_ok = false;
+            continue;
+        }
+        const auto data = view.block_data(*block);
+        const auto& e = layout.blocks()[*block];
+        blocks_ok = blocks_ok && std::ranges::equal(data, computed_at(limb.address, limb.modulus)) &&
+                    nbbf::domain_of(e) == nbbf::Domain::Evaluation && nbbf::order_of(e) == nbbf::Order::BitReversed;
+    }
+    check(blocks_ok, "each limb holds what the run computed at its address, evaluation domain, bit-reversed");
+    check(OutputMetadata::read(dir / "result.nbom") == meta, "the output metadata is shipped with the result");
+
+    // Failures.
+    check_bind_error([&] { write_result(rec, OutputMetadata{}, computed_at, tmp / "no_meta"); },
+                     BindErrc::MissingOutputMetadata, "output:y", "an output without output metadata");
+    check_bind_error(
+        [&] {
+            write_result(rec, meta, [](std::uint64_t a, std::uint64_t q) { return std::vector<std::uint64_t>(kN - 1, a % q); },
+                         tmp / "short");
+        },
+        BindErrc::ResidueCountMismatch, "has 3 residues", "a limb with too few residues");
+    bool out_of_range = false;
+    try {
+        write_result(rec, meta, [](std::uint64_t, std::uint64_t q) { return std::vector<std::uint64_t>(kN, q); },
+                     tmp / "range");
+    } catch (const nbbf::Exception&) {
+        out_of_range = true;
+    }
+    check(out_of_range && !std::filesystem::exists(tmp / "range" / "result.nbbf"),
+          "a residue out of range fails before any file is written");
+}
+
 
 }  // namespace
 
 int main() {
-    return run_tests("binding_bind_test.tmp", [](const std::filesystem::path&) {
+    return run_tests("binding_bind_test.tmp", [](const std::filesystem::path& tmp) {
         test_bind();
         test_outputs();
+        test_result(tmp);
     });
 }

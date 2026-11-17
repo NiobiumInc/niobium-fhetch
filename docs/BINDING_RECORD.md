@@ -181,9 +181,26 @@ It ignores, and reports:
 Moduli are matched by value: a block's `modulus_index` refers to its own file's
 `moduli`, which may list primes in another order or list others besides.
 
-Kind `output` is never bound. A result is written the other way: for each
-output object, each run's addresses are read back and written as NBBF blocks
-under the record's moduli and roots, with a label index naming each object.
+Kind `output` is never bound; a result is written the other way (Result).
+
+## Result
+
+`write_result(record, output_metadata, residues, dir)` writes a run's outputs as
+`result.nbbf`, `result.nbli` and `result.nbom`. `residues(address, modulus)` is
+the server's: the `ring_dim` residues it computed at that trace address, in
+`[0, modulus)`, evaluation domain, bit-reversed order.
+
+- Objects follow record order; each output's big polynomials are contiguous,
+  the first at the next free `poly_index`.
+- Every limb of every run becomes one block of its big polynomial under its
+  modulus, in evaluation domain, bit-reversed order.
+- The NBBF file declares only the moduli the outputs use, in the record's order,
+  each with the record's root.
+- The label index names each output object; `result.nbom` holds the output
+  metadata entry of each, in the same order.
+
+It fails when an output has no output metadata entry, or a limb's residues are
+not `ring_dim` many or not below their modulus. No result file is written then.
 
 ## Output metadata
 

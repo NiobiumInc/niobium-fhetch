@@ -10,12 +10,14 @@
 /**
  * @file binding.h
  * @brief Bind, which joins an NBBF upload and its label index with a binding
- *        record, and the output limbs a result writer reads back. See
- *        docs/BINDING_RECORD.md, Bind.
+ *        record, and its inverse, which writes a run's outputs back as an NBBF
+ *        result. See docs/BINDING_RECORD.md, Bind and Result.
  *
  *     const auto rec = BindingRecord::read("program.nbbr");
  *     const auto res = bind_upload(rec, Kind::Key, nbbf_file.view(), label_index);
  *     // res.bindings: (trace address, NBBF block) pairs, sorted by address
+ *     // ... run the trace ...
+ *     write_result(rec, OutputMetadata::read("program.nbom"), residues_at, out_dir);
  *
  * C++20 and needs nbbf: the opt-in nbfhetch_binding library. The record itself
  * (niobium/binding_record.h) is C++17 and dependency-free.
@@ -23,12 +25,15 @@
 #pragma once
 
 #include "niobium/binding_record.h"
+#include "niobium/output_metadata.h"
 
 #include <nbbf/label_index.hpp>
 #include <nbbf/nbbf.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -49,6 +54,8 @@ enum class BindErrc : std::uint8_t {
     BadRepresentation,  ///< a block is not evaluation domain, bit-reversed order
     UnexpectedLabel,    ///< an input upload names a label the record lacks
     WrongPrefix,        ///< an input upload names a label not prefixed "input:"
+    MissingOutputMetadata,  ///< write_result: an output has no output metadata entry
+    ResidueCountMismatch,   ///< write_result: a limb's residues are not ring_dim many
 };
 
 /// A bind failure. label() is the label it concerns (empty for a failure of
@@ -120,5 +127,18 @@ struct OutputObject {
 /// writer reads each address back and writes NBBF blocks under the record's
 /// moduli and roots, plus a label index naming each object.
 std::vector<OutputObject> output_limbs(const BindingRecord& record);
+
+/// The residues a run computed at trace `address`, whose modulus is `modulus`:
+/// ring_dim values in [0, modulus), evaluation domain, bit-reversed order.
+/// Throws if it has none.
+using ResidueSource = std::function<std::vector<std::uint64_t>(std::uint64_t address, std::uint64_t modulus)>;
+
+/// Writes every output of the record into `dir` as result.nbbf, result.nbli
+/// and result.nbom (docs/BINDING_RECORD.md, Result), creating `dir`. The
+/// NBBF declares only the primes the outputs use. Throws BindError
+/// (MissingOutputMetadata, ResidueCountMismatch), nbbf::Exception (a residue
+/// out of range, a failed write) and whatever `residues` throws.
+void write_result(const BindingRecord& record, const OutputMetadata& metadata, const ResidueSource& residues,
+                  const std::filesystem::path& dir);
 
 }  // namespace niobium::binding
