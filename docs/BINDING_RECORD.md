@@ -28,18 +28,21 @@ limits.
 | :---- | :---- | :---- | :---- | :---- |
 | input | 0 | `input:` | program author | `input:x` |
 | output | 1 | `output:` | program author | `output:result` |
-| key | 2 | `key:` | system | `key:relin`, `key:galois:5` |
+| key | 2 | `key:` | system | `key:relin`, `key:relin:3`, `key:galois:5` |
 | constant | 3 | `const:` | author or system | `const:weights`, `const:boot:0`, `const:op:17` |
 
 - An author-chosen name is non-empty and contains no `:`. Key names are all
   the system's. A constant's system name always contains one (`boot:0`), so it
   never collides with an author's.
-- `key:relin` is the relinearization key. `key:galois:<g>` is the automorphism
-  key for Galois element `g`. No other key name is valid.
+- `key:relin` is the relinearization key for the `s^2` component of a
+  ciphertext. `key:relin:<degree>`, 3 or more, relinearizes its `s^degree` component: a
+  key set made for relinearizing ciphertexts of degree above 2 has one per
+  degree, from `key:relin` up. `key:galois:<g>` is the automorphism key for
+  Galois element `g`. No other key name is valid.
 - `const:boot:<n>` and `const:op:<n>` are constants the system captures (from
   bootstrapping, and from inside other operations), numbered from 0 in capture
   order within each prefix.
-- Numbers (`<g>`, `<n>`) are decimal without leading zeros, so one object has
+- Numbers (`<degree>`, `<g>`, `<n>`) are decimal without leading zeros, so one object has
   one label.
 - A label's prefix matches its object's kind.
 
@@ -54,7 +57,7 @@ on them.
 | Object | `poly_count` | Big polynomial `i` |
 | :---- | :---- | :---- |
 | Ciphertext (input, output) with elements `c_0 … c_k`, decrypting as `Σ c_j·s^j` | `k + 1` | `c_i` |
-| Key-switching key (`key:relin`, `key:galois:<g>`) with `d` digits | `2d` | `i = 2j`: `b_j`; `i = 2j + 1`: `a_j` |
+| Key-switching key (`key:relin`, `key:relin:<degree>`, `key:galois:<g>`) with `d` digits | `2d` | `i = 2j`: `b_j`; `i = 2j + 1`: `a_j` |
 | Constant | 1 | the constant |
 
 - A key-switching key is `d` pairs `(b_j, a_j)`, each shaped like a ciphertext:

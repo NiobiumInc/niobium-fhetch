@@ -74,6 +74,11 @@ inline bool is_valid_label(std::string_view label, Kind kind) { return label_pro
 /// not a well-formed label of `kind`.
 std::string make_label(Kind kind, std::string_view name);
 
+/// The label of the relinearization key for the s^degree component:
+/// `key:relin` for 2, `key:relin:<degree>` above. Throws RecordError
+/// (InvalidArgument) below 2.
+std::string relin_key_label(std::uint32_t degree);
+
 // -----------------------------------------------------------------------------
 // Errors
 // -----------------------------------------------------------------------------

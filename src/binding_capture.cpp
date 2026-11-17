@@ -189,13 +189,13 @@ void capture_binding_keys(const lbcrypto::CryptoContext<DCRTPoly>& cc) {
         if (tag.empty()) return;
         using CC = lbcrypto::CryptoContextImpl<DCRTPoly>;
         const auto& mult = CC::GetAllEvalMultKeys();
-        if (const auto it = mult.find(tag); it != mult.end() && !it->second.empty()) {
-            if (it->second.size() > 1)
-                warn("keys", std::runtime_error("more than one EvalMult key under the client's tag; key:relin left out"));
-            else
-                guarded("key:relin",
-                        [&] { add_object(binding::make_label(Kind::Key, "relin"), Kind::Key, big_polys(it->second.front())); });
-        }
+        // Entry i relinearizes the s^(i+2) component (EvalMultKeysGen): key:relin, key:relin:3, ...
+        if (const auto it = mult.find(tag); it != mult.end())
+            for (std::size_t i = 0; i < it->second.size(); ++i)
+                guarded("key:relin", [&] {
+                    add_object(binding::relin_key_label(static_cast<std::uint32_t>(i + 2)), Kind::Key,
+                               big_polys(it->second[i]));
+                });
         const auto& autos = CC::GetAllEvalAutomorphismKeys();
         if (const auto it = autos.find(tag); it != autos.end() && it->second)
             for (const auto& [galois, key] : *it->second)

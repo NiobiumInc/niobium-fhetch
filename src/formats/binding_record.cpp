@@ -158,6 +158,15 @@ bool is_numbered(std::string_view name, std::initializer_list<std::string_view> 
     });
 }
 
+// `relin:<d>`, d >= 3: the key that relinearizes the s^d component. The s^2
+// key is plain `relin`.
+bool is_relin_degree(std::string_view name) {
+    constexpr std::string_view prefix = "relin:";
+    if (!starts_with(name, prefix) || !is_decimal(name.substr(prefix.size()))) return false;
+    const auto digits = name.substr(prefix.size());
+    return digits.size() > 1 || digits.front() >= '3';
+}
+
 bool is_author_name(std::string_view name) { return !name.empty() && name.find(':') == std::string_view::npos; }
 
 auto limb_key(const Limb& l) { return std::make_pair(l.big_poly, l.modulus_index); }
@@ -206,8 +215,9 @@ std::string label_problem(std::string_view label, Kind kind) {
                        " name is non-empty and contains no ':'";
             break;
         case Kind::Key:
-            if (name != "relin" && !is_numbered(name, {"galois:"}))
-                return "label " + in_quotes(label) + ": a key is named 'relin' or 'galois:<decimal>'";
+            if (name != "relin" && !is_relin_degree(name) && !is_numbered(name, {"galois:"}))
+                return "label " + in_quotes(label) +
+                       ": a key is named 'relin', 'relin:<degree>' (3 or more) or 'galois:<decimal>'";
             break;
         case Kind::Constant:
             if (!is_author_name(name) && !is_numbered(name, {"boot:", "op:"}))
@@ -222,6 +232,11 @@ std::string make_label(Kind kind, std::string_view name) {
     std::string label = std::string(kind_prefix(kind)) + std::string(name);
     if (auto problem = label_problem(label, kind); !problem.empty()) fail_arg(problem);
     return label;
+}
+
+std::string relin_key_label(std::uint32_t degree) {
+    if (degree < 2) fail_arg("a relinearization key's degree is 2 or more, not " + std::to_string(degree));
+    return make_label(Kind::Key, degree == 2 ? std::string("relin") : "relin:" + std::to_string(degree));
 }
 
 // --- Comparison -------------------------------------------------------------------

@@ -51,14 +51,21 @@ void test_labels() {
     check(kind_of_label("key:relin") == Kind::Key && kind_of_label("const:w") == Kind::Constant &&
               !kind_of_label("weights").has_value(),
           "kind_of_label");
-    for (const auto* good : {"key:relin", "key:galois:5", "key:galois:0"})
+    for (const auto* good : {"key:relin", "key:relin:3", "key:relin:10", "key:galois:5", "key:galois:0"})
         check(is_valid_label(good, Kind::Key), std::string("valid key label ") + good);
+    check(relin_key_label(2) == "key:relin" && relin_key_label(3) == "key:relin:3" &&
+              relin_key_label(12) == "key:relin:12",
+          "relin_key_label: key:relin for degree 2, key:relin:<degree> above");
+    check_record_error([] { (void)relin_key_label(1); }, RecordErrc::InvalidArgument, "degree",
+                       "relin_key_label rejects degree 1");
     for (const auto* good : {"const:w", "const:boot:0", "const:op:17", "const:a.b-c_d"})
         check(is_valid_label(good, Kind::Constant), std::string("valid constant label ") + good);
     const std::vector<std::pair<std::string, Kind>> bad{
         {"input:", Kind::Input},          {"input:a:b", Kind::Input},       {"output:x", Kind::Input},
         {"key:x", Kind::Key},             {"key:galois:", Kind::Key},       {"key:galois:05", Kind::Key},
-        {"key:galois:-1", Kind::Key},     {"const:boot:x", Kind::Constant}, {"const:foo:1", Kind::Constant},
+        {"key:galois:-1", Kind::Key},     {"key:relin:2", Kind::Key},       {"key:relin:1", Kind::Key},
+        {"key:relin:03", Kind::Key},      {"key:relin:", Kind::Key},
+        {"const:boot:x", Kind::Constant}, {"const:foo:1", Kind::Constant},
         {"input:a b", Kind::Input},       {"input:" + std::string(250, 'a'), Kind::Input},
     };
     for (const auto& [label, kind] : bad)
