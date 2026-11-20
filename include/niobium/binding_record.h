@@ -83,6 +83,10 @@ std::string relin_key_label(std::uint32_t degree);
 /// `key:galois:<galois>`.
 std::string galois_key_label(std::uint64_t galois);
 
+/// The Galois element galois_key_label() put in `label`; nullopt for any other
+/// label.
+std::optional<std::uint64_t> galois_element_of(std::string_view label) noexcept;
+
 // -----------------------------------------------------------------------------
 // Errors
 // -----------------------------------------------------------------------------

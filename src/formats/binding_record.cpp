@@ -239,7 +239,27 @@ std::string relin_key_label(std::uint32_t degree) {
     return make_label(Kind::Key, degree == 2 ? std::string("relin") : "relin:" + std::to_string(degree));
 }
 
-std::string galois_key_label(std::uint64_t galois) { return make_label(Kind::Key, "galois:" + std::to_string(galois)); }
+namespace {
+constexpr std::string_view kGaloisPrefix = "key:galois:";
+}  // namespace
+
+std::string galois_key_label(std::uint64_t galois) {
+    return std::string(kGaloisPrefix) + std::to_string(galois);
+}
+
+std::optional<std::uint64_t> galois_element_of(std::string_view label) noexcept {
+    if (label.substr(0, kGaloisPrefix.size()) != kGaloisPrefix) return std::nullopt;
+    const auto digits = label.substr(kGaloisPrefix.size());
+    if (digits.empty() || (digits.size() > 1 && digits.front() == '0')) return std::nullopt;
+    std::uint64_t value = 0;
+    for (const char c : digits) {
+        if (c < '0' || c > '9') return std::nullopt;
+        const auto digit = static_cast<std::uint64_t>(c - '0');
+        if (value > (UINT64_MAX - digit) / 10) return std::nullopt;
+        value = (value * 10) + digit;
+    }
+    return value;
+}
 
 // --- Comparison -------------------------------------------------------------------
 

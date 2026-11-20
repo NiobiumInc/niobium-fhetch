@@ -58,6 +58,13 @@ void test_labels() {
           "relin_key_label: key:relin for degree 2, key:relin:<degree> above");
     check_record_error([] { (void)relin_key_label(1); }, RecordErrc::InvalidArgument, "degree",
                        "relin_key_label rejects degree 1");
+    check(galois_key_label(5) == "key:galois:5" && galois_element_of(galois_key_label(5)) == 5U &&
+              galois_element_of(galois_key_label(UINT64_MAX)) == UINT64_MAX &&
+              is_valid_label(galois_key_label(0), Kind::Key),
+          "galois_key_label and galois_element_of round-trip");
+    for (const auto* other : {"key:galois:", "key:galois:05", "key:galois:-1", "key:galois:5x", "key:relin",
+                              "input:galois:5", "key:galois:18446744073709551616"})
+        check(!galois_element_of(other).has_value(), std::string("galois_element_of: none in ") + other);
     for (const auto* good : {"const:w", "const:boot:0", "const:op:17", "const:a.b-c_d"})
         check(is_valid_label(good, Kind::Constant), std::string("valid constant label ") + good);
     const std::vector<std::pair<std::string, Kind>> bad{
