@@ -198,6 +198,14 @@ target_include_directories(nbfhetch_core PUBLIC
 find_package(Threads REQUIRED)
 target_link_directories(nbfhetch_core PUBLIC $<BUILD_INTERFACE:${OPENFHE_LIBRARY_PATH}>)
 target_link_libraries(nbfhetch_core PUBLIC nbfhetch_formats ${OPENFHE_CORE_LIBRARY} Threads::Threads)
+# The instrumented shared libOPENFHEcore leaves the recorder's cprobe hooks
+# undefined, and a process with no recorder never calls them (it defines only
+# the load-time openfhe_cporbe_with_openmp, as tests/fhetch_core does). macOS
+# binds them lazily; GNU ld refuses an executable over a shared library with
+# undefined references unless told they are left for run time.
+if(NOT APPLE AND NOT NIOBIUM_FHETCH_OPENFHE_STATIC)
+  target_link_options(nbfhetch_core INTERFACE "LINKER:--allow-shlib-undefined")
+endif()
 
 # ==============================================================================
 # Library target
