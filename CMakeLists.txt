@@ -140,13 +140,20 @@ endif()
 # writes them; bind (nbfhetch_binding, below) is the opt-in C++20/nbbf part.
 # ==============================================================================
 
-# Static (PIC): it is folded into libnbfhetch, so whatever ships libnbfhetch
-# ships no extra shared library.
-add_library(nbfhetch_formats STATIC
+# Compiled once, as objects: they make up the static nbfhetch_formats, and they
+# are compiled into libnbfhetch itself, so libnbfhetch (shared or static, and a
+# consumer that links its archive by path) needs no second library.
+add_library(nbfhetch_formats_objects OBJECT
     src/formats/binding_record.cpp
     src/formats/file_io.cpp
     src/formats/output_metadata.cpp
 )
+set_target_properties(nbfhetch_formats_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_features(nbfhetch_formats_objects PUBLIC cxx_std_17)
+target_include_directories(nbfhetch_formats_objects PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+add_library(nbfhetch_formats STATIC $<TARGET_OBJECTS:nbfhetch_formats_objects>)
 add_library(Niobium::fhetch_formats ALIAS nbfhetch_formats)
 set_target_properties(nbfhetch_formats PROPERTIES
     OUTPUT_NAME "nbfhetch_formats"
@@ -211,8 +218,10 @@ endif()
 # Library target
 # ==============================================================================
 
-# The core's objects plus the recorder (see above for why not the archive).
-add_library(niobium_fhetch ${RECORDER_SOURCES} $<TARGET_OBJECTS:nbfhetch_core_objects>)
+# The core's and the formats' objects plus the recorder (see above for why not
+# their archives).
+add_library(niobium_fhetch ${RECORDER_SOURCES} $<TARGET_OBJECTS:nbfhetch_core_objects>
+    $<TARGET_OBJECTS:nbfhetch_formats_objects>)
 add_library(Niobium::fhetch ALIAS niobium_fhetch)
 
 # Output name: libnbfhetch.so / libnbfhetch.a
@@ -243,7 +252,6 @@ endforeach()
 target_compile_definitions(niobium_fhetch PUBLIC OPENFHE_CPROBES)
 
 target_link_libraries(niobium_fhetch PRIVATE Threads::Threads)
-target_link_libraries(niobium_fhetch PUBLIC nbfhetch_formats)
 
 target_link_directories(niobium_fhetch
     PUBLIC $<BUILD_INTERFACE:${OPENFHE_LIBRARY_PATH}>)
