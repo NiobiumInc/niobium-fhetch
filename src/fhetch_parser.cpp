@@ -17,7 +17,6 @@
 #include "niobium/fhetch_parser.h"
 #include "niobium/fhetch_api.h"
 #include "niobium/fhetch_reader.h"
-#include "niobium/fhetch_recording.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -51,11 +50,10 @@ struct Driver {
 
     // Get-or-create a source polynomial. Reads before writes are treated as
     // live-in inputs: if the caller supplied real values for the address via
-    // DriveInputs, we use those AND tag the known (values, modulus) pair as is
-    // (recording::tag_input_values), so a recorder stores it at the
-    // Polynomial's synthetic FHETCH address ahead of the other inputs. If no
-    // caller-provided data is available, fall back to a zero-filled
-    // placeholder tagged via the normal tag_input() path — whose modulus a
+    // DriveInputs, we use those and tag the input with its known modulus
+    // (bind_modulus, ahead of any instruction that names one), so a recorder
+    // stores those values under that modulus. If no caller-provided data is
+    // available, fall back to a zero-filled placeholder whose modulus a
     // recorder infers from the first sr_* op that uses the address.
     Polynomial& get_or_create_src(uint64_t file_addr) {
         auto it = polys.find(file_addr);
@@ -65,8 +63,8 @@ struct Driver {
         if (in_it != inputs.data.end() && !in_it->second.values.empty()) {
             auto p = Polynomial::from_data(in_it->second.values, ring_dim,
                                           Format::Evaluation);
-            recording::tag_input_values("in_" + std::to_string(file_addr), p,
-                                        in_it->second.modulus, in_it->second.values);
+            tag_input("in_" + std::to_string(file_addr), p);
+            bind_modulus(p, in_it->second.modulus);
             stats.inputs_materialized++;
             auto [ins, _] = polys.emplace(file_addr, std::move(p));
             return ins->second;

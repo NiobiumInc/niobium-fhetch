@@ -27,6 +27,7 @@
  * it; this test stands in for a host with no recorder attached, as an
  * application of the core alone must. The core itself references no hook.
  */
+#include "niobium/compiler.h"
 #include "niobium/fhetch_api.h"
 #include "niobium/fhetch_ir.h"
 #include "niobium/fhetch_reader.h"
@@ -39,6 +40,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -74,13 +76,11 @@ int main() {
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
 
-    auto& writer = niobium::detail::trace_writer();
+    auto& writer = niobium::fhetch::recording::trace_writer();
     fhetch::reset_for_epoch();
     writer.clear();
     writer.set_trace_format(niobium::TraceFormat::Binary);
     writer.start_recording();
-    check(!niobium::detail::montgomery_mode() && !niobium::detail::bit_reversal_mode(),
-          "recording modes start ordinary-form");
 
     const auto a_values = ramp(3);
     const auto b_values = ramp(11);
@@ -100,7 +100,7 @@ int main() {
     check(inputs.size() == 2 && inputs[0].name == "a" && inputs[1].name == "b" && outputs.size() == 1 &&
               outputs[0].name == "d",
           "the tagged inputs and output, in tagging order");
-    const auto address = [](const fhetch::Polynomial& p) { return niobium::detail::polynomial_address(p); };
+    const auto address = [](const fhetch::Polynomial& p) { return niobium::fhetch::recording::polynomial_address(p); };
     const auto& moduli = recording::address_moduli();
     check(moduli.count(address(a)) == 1 && moduli.at(address(a)) == kQ && moduli.count(address(b)) == 1 &&
               moduli.at(address(d)) == kQ,
@@ -108,6 +108,11 @@ int main() {
     check(recording::values_or_zeros(a) == a_values &&
               recording::values_or_zeros(fhetch::Polynomial::zeros(kN)) == std::vector<std::uint64_t>(kN, 0),
           "values_or_zeros: the values, or zeros");
+    std::vector<recording::TaggedResidue> walked;
+    recording::for_each_residue(inputs[0], [&](const recording::TaggedResidue& r) { walked.push_back(r); });
+    check(walked.size() == 1 && walked[0].kind == niobium::CapturedKind::SRP && !walked[0].starts_new_element &&
+              walked[0].poly == &std::get<fhetch::Polynomial>(inputs[0].value) && walked[0].modulus == kQ,
+          "for_each_residue: a polynomial, under the modulus its instructions named");
 
     // The trace reads back, and the simulator runs it.
     const auto read = fhetch::read_fhetch_file(trace);
@@ -129,10 +134,23 @@ int main() {
     check(g1 != g0 && recording::tagged_inputs().empty() && recording::tagged_outputs().empty() &&
               recording::address_moduli().empty(),
           "reset_for_epoch clears the registries and changes the generation");
-    recording::tag_input_values("live_in", fhetch::Polynomial::zeros(kN), kQ, a_values);
-    check(recording::tagged_inputs().size() == 1 && recording::tagged_inputs()[0].explicit_values &&
-              recording::tagged_inputs()[0].modulus == kQ && recording::tagged_inputs()[0].values == a_values,
-          "tag_input_values keeps the given modulus and values");
+    // A live-in whose modulus is known ahead of any instruction: tagged, then bound.
+    const auto live_in = fhetch::Polynomial::from_data(a_values, kN);
+    fhetch::tag_input("live_in", live_in);
+    fhetch::bind_modulus(live_in, kQ);
+    std::optional<std::uint64_t> live_in_modulus;
+    recording::for_each_residue(recording::tagged_inputs().at(0),
+                                [&](const recording::TaggedResidue& r) { live_in_modulus = r.modulus; });
+    check(live_in_modulus == kQ && recording::values_or_zeros(live_in) == a_values,
+          "a live-in tagged and bound keeps its modulus and values");
+    // An MRP walks its residues in base order, each under its own prime.
+    constexpr std::uint64_t kQ2 = 786433;
+    fhetch::tag_input("mrp", fhetch::MRP(fhetch::ModuliBase{kQ, kQ2}, kN));
+    std::vector<std::uint64_t> primes;
+    recording::for_each_residue(recording::tagged_inputs().at(1), [&](const recording::TaggedResidue& r) {
+        if (r.kind == niobium::CapturedKind::MRP && r.modulus) primes.push_back(*r.modulus);
+    });
+    check(primes == std::vector<std::uint64_t>{kQ, kQ2}, "for_each_residue: an MRP's residues, in base order");
     recording::clear_address_moduli();
     check(recording::registry_generation() != g1, "clear_address_moduli changes the generation");
 

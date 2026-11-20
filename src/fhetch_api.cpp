@@ -7,6 +7,7 @@
 // via the TraceWriter. The server-side niobium-compiler parses the FHETCH
 // trace and lowers it to internal hardware instructions.
 
+#include "niobium/compiler.h"
 #include "niobium/fhetch_api.h"
 #include "niobium/checks.h"
 #include "niobium/fhetch_recording.h"
@@ -18,6 +19,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -29,6 +31,7 @@
 #include <unordered_set>
 #include <vector>
 #include <utility>
+#include <variant>
 
 namespace niobium::fhetch {
 
@@ -81,7 +84,7 @@ static void remember_modulus(uintptr_t a, uint64_t q) {
 
 // Register a modulus and return its table index.
 static uint32_t midx(uint64_t q) {
-    return niobium::detail::trace_writer().register_modulus(q);
+    return niobium::fhetch::recording::trace_writer().register_modulus(q);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +107,7 @@ static Instruction ir(FhOpcode op, uintptr_t d, uintptr_t s1) {
 }
 
 static void emit(const Instruction& inst) {
-    niobium::detail::trace_writer().emit(inst);
+    niobium::fhetch::recording::trace_writer().emit(inst);
 }
 
 /// dest, src1, src2, m=
@@ -534,78 +537,34 @@ void reset_for_epoch() {
 // INPUT / OUTPUT TAGGING
 // ============================================================================
 
-void tag_input(const std::string& name, const Polynomial& p) {
-    InputEntry e; e.name = name; e.kind = InputEntry::POLY; e.poly = p;
-    input_registry().push_back(std::move(e));
-}
-
-void tag_input(const std::string& name, const MRP& m) {
-    InputEntry e; e.name = name; e.kind = InputEntry::MRP_KIND; e.mrp = m;
-    input_registry().push_back(std::move(e));
-}
-
-void tag_input(const std::string& name, const MRPArray& arr) {
-    InputEntry e; e.name = name; e.kind = InputEntry::MRPA; e.mrpa = arr;
-    input_registry().push_back(std::move(e));
-}
-
-void tag_input(const std::string& name, const SRPArray& arr) {
-    InputEntry e; e.name = name; e.kind = InputEntry::SRPA; e.srpa = arr;
-    input_registry().push_back(std::move(e));
-}
+void tag_input(const std::string& name, const Polynomial& p) { input_registry().push_back({name, p}); }
+void tag_input(const std::string& name, const MRP& m) { input_registry().push_back({name, m}); }
+void tag_input(const std::string& name, const MRPArray& arr) { input_registry().push_back({name, arr}); }
+void tag_input(const std::string& name, const SRPArray& arr) { input_registry().push_back({name, arr}); }
 
 void tag_output(const std::string& name, const Polynomial& p) {
-    niobium::detail::trace_writer().comment(
-        "output " + name + " %" + std::to_string(p.impl()->address));
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::POLY; e.poly = p;
-    probe_registry().push_back(std::move(e));
+    recording::trace_writer().comment("output " + name + " %" + std::to_string(p.impl()->address));
+    probe_registry().push_back({name, p});
 }
 
 void tag_output(const std::string& name, const MRP& m) {
     for (auto q : m.base())
-        niobium::detail::trace_writer().comment(
-            "output " + name + " %" + std::to_string(m[q].impl()->address));
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::MRP_KIND; e.mrp = m;
-    probe_registry().push_back(std::move(e));
+        recording::trace_writer().comment("output " + name + " %" + std::to_string(m[q].impl()->address));
+    probe_registry().push_back({name, m});
 }
 
-void tag_output(const std::string& name, const MRPArray& arr) {
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::MRPA; e.mrpa = arr;
-    probe_registry().push_back(std::move(e));
-}
-
-void tag_output(const std::string& name, const SRPArray& arr) {
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::SRPA; e.srpa = arr;
-    probe_registry().push_back(std::move(e));
-}
+void tag_output(const std::string& name, const MRPArray& arr) { probe_registry().push_back({name, arr}); }
+void tag_output(const std::string& name, const SRPArray& arr) { probe_registry().push_back({name, arr}); }
 
 uint64_t get_input_ring_dimension() {
+    uint64_t ring_dim = 0;
     for (const auto& input : input_registry()) {
-        switch (input.kind) {
-        case InputEntry::POLY:
-            if (input.poly.is_valid() && input.poly.ring_dimension() > 0)
-                return input.poly.ring_dimension();
-            break;
-        case InputEntry::MRP_KIND:
-            if (input.mrp.is_valid() && !input.mrp.base().empty()) {
-                const auto& p = input.mrp[input.mrp.base()[0]];
-                if (p.is_valid() && p.ring_dimension() > 0)
-                    return p.ring_dimension();
-            }
-            break;
-        case InputEntry::MRPA:
-            if (input.mrpa.length() > 0 && input.mrpa[0].is_valid()) {
-                const auto& b = input.mrpa[0].base();
-                if (!b.empty()) return input.mrpa[0][b[0]].ring_dimension();
-            }
-            break;
-        case InputEntry::SRPA:
-            if (input.srpa.length() > 0 && input.srpa[0].is_valid())
-                return input.srpa[0].ring_dimension();
-            break;
-        }
+        recording::for_each_residue(input, [&](const recording::TaggedResidue& r) {
+            if (ring_dim == 0) ring_dim = r.poly->ring_dimension();
+        });
+        if (ring_dim != 0) break;
     }
-    return 0;
+    return ring_dim;
 }
 
 void save_input_data() {
@@ -1570,16 +1529,57 @@ namespace niobium::fhetch::recording {
 const std::vector<TaggedEntry>& tagged_inputs() { return input_registry(); }
 const std::vector<TaggedEntry>& tagged_outputs() { return probe_registry(); }
 
-void tag_input_values(const std::string& name, const Polynomial& p, std::uint64_t modulus,
-                      std::vector<std::uint64_t> values) {
-    InputEntry e;
-    e.name = name;
-    e.kind = InputEntry::POLY;
-    e.poly = p;
-    e.explicit_values = true;
-    e.modulus = modulus;
-    e.values = std::move(values);
-    input_registry().push_back(std::move(e));
+namespace {
+
+template <class... Fs>
+struct Overloaded : Fs... {
+    using Fs::operator()...;
+};
+template <class... Fs>
+Overloaded(Fs...) -> Overloaded<Fs...>;
+
+std::optional<std::uint64_t> known_modulus(const Polynomial& p) {
+    const auto& map = address_modulus_map();
+    const auto it = map.find(p.impl()->address);
+    if (it == map.end()) return std::nullopt;
+    return it->second;
+}
+
+// An MRP's valid residues, in base order; `first` marks whether the first of
+// them starts an element.
+void for_each_mrp_residue(const MRP& m, CapturedKind kind, bool first,
+                          const std::function<void(const TaggedResidue&)>& f) {
+    if (!m.is_valid()) return;
+    for (const auto q : m.base()) {
+        const auto& residue = m[q];
+        if (!residue.is_valid()) continue;
+        f(TaggedResidue{kind, first, &residue, q});
+        first = false;
+    }
+}
+
+}  // namespace
+
+void for_each_residue(const TaggedEntry& entry, const std::function<void(const TaggedResidue&)>& f) {
+    std::visit(Overloaded{
+                   [&](const Polynomial& p) {
+                       if (p.is_valid()) f(TaggedResidue{CapturedKind::SRP, false, &p, known_modulus(p)});
+                   },
+                   [&](const MRP& m) { for_each_mrp_residue(m, CapturedKind::MRP, false, f); },
+                   [&](const MRPArray& arr) {
+                       if (!arr.is_valid()) return;
+                       for (size_t i = 0; i < arr.length(); ++i)
+                           for_each_mrp_residue(arr[i], CapturedKind::MRPArray, true, f);
+                   },
+                   [&](const SRPArray& arr) {
+                       if (!arr.is_valid()) return;
+                       for (size_t i = 0; i < arr.length(); ++i) {
+                           const auto& p = arr[i];
+                           if (p.is_valid()) f(TaggedResidue{CapturedKind::SRPArray, true, &p, known_modulus(p)});
+                       }
+                   },
+               },
+               entry.value);
 }
 
 const std::unordered_map<std::uintptr_t, std::uint64_t>& address_moduli() { return address_modulus_map(); }
@@ -1597,17 +1597,8 @@ std::vector<std::uint64_t> values_or_zeros(const Polynomial& p) {
     return zeros;
 }
 
-}  // namespace niobium::fhetch::recording
-
-namespace niobium::detail {
-
-uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p) {
+uintptr_t polynomial_address(const Polynomial& p) {
     return p.impl() ? p.impl()->address : static_cast<uintptr_t>(-1);
 }
 
-RecordingModes& recording_modes() {
-    static RecordingModes modes;
-    return modes;
-}
-
-}  // namespace niobium::detail
+}  // namespace niobium::fhetch::recording

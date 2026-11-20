@@ -79,6 +79,10 @@ std::string make_label(Kind kind, std::string_view name);
 /// (InvalidArgument) below 2.
 std::string relin_key_label(std::uint32_t degree);
 
+/// The label of the automorphism key for Galois element `galois`:
+/// `key:galois:<galois>`.
+std::string galois_key_label(std::uint64_t galois);
+
 // -----------------------------------------------------------------------------
 // Errors
 // -----------------------------------------------------------------------------

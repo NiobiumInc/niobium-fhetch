@@ -210,7 +210,8 @@ niobium-fhetch/
   include/
     niobium/
       fhetch_api.h            # Complete FHETCH instruction set
-      fhetch_recording.h      # What a recorder reads from the IR builder
+      fhetch_recording.h      # What a recorder reads from the IR builder (nbfhetch_core),
+                              # and what a program linking the core alone must define
       trace_writer.h          # trace emitter (.fhex binary, .fhetch text)
       compiler.h              # Session API
   src/

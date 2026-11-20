@@ -21,6 +21,7 @@
 
 #include "niobium/binding.h"
 #include "niobium/binding_record.h"
+#include "niobium/output_metadata.h"
 
 #include <nbbf/label_index.hpp>
 #include <nbbf/nbbf.hpp>
@@ -80,12 +81,12 @@ std::shared_ptr<Upload> make_upload(const std::vector<UpObject>& objects, const 
     };
     std::vector<std::uint64_t> roots(opt.moduli.size(), 0);
     auto up = std::make_shared<Upload>();
-    nbbf::LabelIndexBuilder labels;
+    std::vector<nbbf::LabelIndex::Entry> labels;
     std::vector<std::tuple<std::uint32_t, std::uint16_t>> blocks;
     std::uint32_t poly = 0;
     for (const auto& o : objects) {
         up->first_poly[o.label] = poly;
-        labels.add(o.label, poly, static_cast<std::uint32_t>(o.polys.size()));
+        labels.push_back({.label = o.label, .first_poly = poly, .poly_count = static_cast<std::uint32_t>(o.polys.size())});
         for (const auto& qs : o.polys) {
             for (const auto q : qs)
                 if (const auto k = index_of(q); k < opt.moduli.size()) blocks.emplace_back(poly, k);  // else left out
@@ -93,7 +94,7 @@ std::shared_ptr<Upload> make_upload(const std::vector<UpObject>& objects, const 
         }
     }
     for (const auto& [label, count] : opt.extra_entries) {
-        labels.add(label, poly, count);
+        labels.push_back({.label = label, .first_poly = poly, .poly_count = count});
         for (std::uint32_t i = 0; i < count; ++i) blocks.emplace_back(poly++, 0);
     }
     if (opt.domain == nbbf::Domain::Evaluation)
@@ -111,7 +112,7 @@ std::shared_ptr<Upload> make_upload(const std::vector<UpObject>& objects, const 
     up->storage.resize((bytes.size() + 7) / 8);
     std::memcpy(up->storage.data(), bytes.data(), bytes.size());
     up->view = nbbf::FileView::parse(std::as_bytes(std::span(up->storage)).first(bytes.size())).value();
-    up->index = nbbf::LabelIndex::parse(labels.serialize(nbbf::header_digest(up->view)).value()).value();
+    up->index = nbbf::LabelIndex::make(nbbf::header_digest(up->view), std::move(labels)).value();
     return up;
 }
 
@@ -172,12 +173,11 @@ void test_bind() {
         check(binds_exactly(rec, Kind::Key, *up, bind_upload(rec, Kind::Key, up->view, up->index)),
               "moduli are matched by value, not index");
     }
-    // The header-region overload.
+    // The header-digest overload.
     {
         const auto up = make_upload(inputs);
-        const auto header = up->view.bytes().first(up->view.layout().header().header_len);
-        const auto res = bind_upload(rec, Kind::Input, header, up->view.layout(), up->index);
-        check(binds_exactly(rec, Kind::Input, *up, res), "binds from the header region and Layout alone");
+        const auto res = bind_upload(rec, Kind::Input, nbbf::header_digest(up->view), up->view.layout(), up->index);
+        check(binds_exactly(rec, Kind::Input, *up, res), "binds from the header digest and Layout alone");
     }
 
     // Ignored and reported.
@@ -320,7 +320,7 @@ void test_result(const std::filesystem::path& tmp) {
     write_result(rec, meta, computed_at, dir);
     const auto file = nbbf::MappedFile::open(dir / "result.nbbf").value();
     const auto index = nbbf::LabelIndex::read(dir / "result.nbli").value();
-    const auto view = file.view();
+    const auto& view = file.view();
     const auto& layout = view.layout();
     const auto* entry = index.find("output:y");
     check(index.check_against(view).has_value() && index.entries().size() == 1 && entry != nullptr &&
@@ -364,6 +364,16 @@ void test_result(const std::filesystem::path& tmp) {
     }
     check(out_of_range && !std::filesystem::exists(tmp / "range" / "result.nbbf"),
           "a residue out of range fails before any file is written");
+    // A failure where an earlier run wrote its result leaves none of it either.
+    bool rewrite_failed = false;
+    try {
+        write_result(rec, meta, [](std::uint64_t, std::uint64_t q) { return std::vector<std::uint64_t>(kN, q); }, dir);
+    } catch (const nbbf::Exception&) {
+        rewrite_failed = true;
+    }
+    check(rewrite_failed && !std::filesystem::exists(dir / "result.nbbf") && !std::filesystem::exists(dir / "result.nbli") &&
+              !std::filesystem::exists(dir / "result.nbom") && !std::filesystem::exists(dir / ".result.staging"),
+          "a failed result removes an earlier run's result and leaves no staging directory");
 }
 
 

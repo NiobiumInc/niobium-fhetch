@@ -143,6 +143,14 @@ set_openfhe_rpath(replay_out_test)
 add_executable(fhetch_core_test fhetch_core/test.cpp)
 target_link_libraries(fhetch_core_test PRIVATE nbfhetch_core)
 set_openfhe_rpath(fhetch_core_test)
+# The instrumented shared libOPENFHEcore leaves the recorder's cprobe hooks
+# undefined, and this process, with no recorder, never calls them (it defines
+# only the load-time hook; see fhetch_recording.h). macOS binds them lazily; GNU
+# ld refuses an executable over a shared library with undefined references
+# unless told they are left for run time.
+if(NOT APPLE AND NOT NIOBIUM_FHETCH_OPENFHE_STATIC)
+  target_link_options(fhetch_core_test PRIVATE "LINKER:--allow-shlib-undefined")
+endif()
 
 # ==============================================================================
 # Binding record (.nbbr) and output metadata (.nbom) formats. C++17, no

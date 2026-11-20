@@ -239,6 +239,8 @@ std::string relin_key_label(std::uint32_t degree) {
     return make_label(Kind::Key, degree == 2 ? std::string("relin") : "relin:" + std::to_string(degree));
 }
 
+std::string galois_key_label(std::uint64_t galois) { return make_label(Kind::Key, "galois:" + std::to_string(galois)); }
+
 // --- Comparison -------------------------------------------------------------------
 
 bool operator==(const Run& a, const Run& b) noexcept {

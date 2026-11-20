@@ -34,7 +34,9 @@
 #include "niobium/fhetch_ir.h"
 #include "niobium/fhetch_parser.h"
 #include "niobium/fhetch_reader.h"
+#include "niobium/fhetch_recording.h"
 #include "niobium/fhetch_sim/simulator.h"
+#include "niobium/trace_writer.h"
 
 #include "math/math-hal.h"
 #include "math/nbtheory.h"
@@ -196,7 +198,7 @@ std::vector<uint64_t> sample(uint64_t q, uint64_t seed, uint64_t n) {
 }
 
 uint64_t address(const Polynomial& p) {
-    return niobium::detail::polynomial_address(p);
+    return niobium::fhetch::recording::polynomial_address(p);
 }
 
 std::filesystem::path scratch_root() {
@@ -305,7 +307,7 @@ Recording record_transforms() {
     r.x1 = sample(kQ1, kSeedX1, kRingDim);
     r.x2 = sample(kQ2, kSeedX2, kRingDim);
 
-    niobium::detail::trace_writer().set_trace_format(niobium::TraceFormat::Both);
+    niobium::fhetch::recording::trace_writer().set_trace_format(niobium::TraceFormat::Both);
     begin_session("transforms");
     const auto a = Polynomial::from_data(r.a, kRingDim, fhetch::Format::Coefficient);
     const auto x = MRP::from_pairs(
@@ -319,7 +321,7 @@ Recording record_transforms() {
     const auto mr_ntt = fhetch::mr_ntt_with_roots(x, {r.psi1, r.psi2});
     const auto mr_back = fhetch::mr_intt_with_roots(mr_ntt, {r.psi1, r.psi2});
     r.trace = end_session();
-    niobium::detail::trace_writer().set_trace_format(niobium::TraceFormat::Text);
+    niobium::fhetch::recording::trace_writer().set_trace_format(niobium::TraceFormat::Text);
 
     r.a_addr = address(a);
     r.x1_addr = address(x[kQ1]);
@@ -392,7 +394,7 @@ bool test_simulator_uses_recorded_roots(const Recording& r) {
 
 /// `record` throws std::invalid_argument and leaves the trace untouched.
 void check_rejected(const std::string& what, const std::function<void()>& record) {
-    const size_t recorded = niobium::detail::trace_writer().instruction_count();
+    const size_t recorded = niobium::fhetch::recording::trace_writer().instruction_count();
     bool rejected = false;
     try {
         record();
@@ -402,7 +404,7 @@ void check_rejected(const std::string& what, const std::function<void()>& record
     }
     if (!rejected) std::cout << "  " << what << ": not rejected" << std::endl;
     CHECK(rejected);
-    CHECK(niobium::detail::trace_writer().instruction_count() == recorded);
+    CHECK(niobium::fhetch::recording::trace_writer().instruction_count() == recorded);
 }
 
 bool test_invalid_roots_are_rejected() {
@@ -547,7 +549,7 @@ bool test_driver_rejects_invalid_roots() {
     const int before = g_checks_failed;
 
     begin_session("driver_invalid");
-    const size_t recorded = niobium::detail::trace_writer().instruction_count();
+    const size_t recorded = niobium::fhetch::recording::trace_writer().instruction_count();
     fhetch::DriveStats stats;
     std::string message;
     try {
@@ -563,7 +565,7 @@ bool test_driver_rejects_invalid_roots() {
     std::cout << "  " << (message.empty() ? "not rejected" : message) << std::endl;
     CHECK(message.rfind("line 5: sr_ntt_with_root: omega 0 ", 0) == 0);
     // Line 4 is already in the session; line 6 was never reached.
-    CHECK(niobium::detail::trace_writer().instruction_count() == recorded + 1);
+    CHECK(niobium::fhetch::recording::trace_writer().instruction_count() == recorded + 1);
     end_session();
     return g_checks_failed == before;
 }

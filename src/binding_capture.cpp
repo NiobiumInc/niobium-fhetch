@@ -9,12 +9,13 @@
 
 /**
  * @file binding_capture.cpp
- * @brief The recorder's binding record and output metadata capture (see
- *        binding_capture.h and docs/BINDING_RECORD.md).
+ * @brief The recorder's binding record and output metadata capture, and
+ *        writing it (binding_capture.h, binding_files.h,
+ *        docs/BINDING_RECORD.md).
  */
 #include "binding_capture.h"
 
-#include "compiler_internal.h"
+#include "binding_files.h"
 #include "niobium/binding_record.h"
 #include "niobium/output_metadata.h"
 
@@ -23,6 +24,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -36,43 +38,32 @@ namespace niobium::detail {
 
 namespace {
 
-using lbcrypto::DCRTPoly;
 using binding::Kind;
+using lbcrypto::DCRTPoly;
 
-/// What lookup_fhetch_address returns for a tower the trace never reads.
-constexpr std::uint64_t kNoAddress = ~std::uint64_t{0};
-
-struct Capture {
-    binding::BindingRecord record;
-    binding::OutputMetadata metadata;
-    std::unordered_map<std::uint64_t, std::uint16_t> modulus_index;  ///< prime -> index into record.moduli
-    std::string key_tag;                                             ///< the client's, from the first input
-};
-
-Capture& capture() {
-    static Capture c;
-    return c;
+void warn(const std::string& what) {
+    std::cout << "[NIOBIUM] WARNING: binding record: " << what << std::endl;
 }
 
-void warn(const char* what, const std::exception& e) {
-    std::cout << "[NIOBIUM] WARNING: binding record: " << what << ": " << e.what() << std::endl;
-}
-
-// Runs a capture step; a failure only warns, so it never fails the recording.
+// Runs a capture step on a capture that has not failed. A failure warns and
+// fails the capture, which then writes no binding files: it never fails the
+// recording.
 template <class F>
 void guarded(const char* what, F&& step) {
+    auto& capture = binding_capture();
+    if (capture.failed) return;
     try {
-        std::forward<F>(step)();
+        std::forward<F>(step)(capture);
     } catch (const std::exception& e) {
-        warn(what, e);
+        warn(std::string(what) + ": " + e.what() + "; the recording gets no binding record");
+        capture.failed = true;
     }
 }
 
 // ring_dim, then Q's primes followed by P's, each with the root of unity its
 // NTT uses, taken once from the program's crypto context.
-void set_params(const lbcrypto::CryptoContext<DCRTPoly>& cc) {
-    auto& c = capture();
-    if (c.record.ring_dim != 0) return;
+void set_params(BindingCapture& capture, const lbcrypto::CryptoContext<DCRTPoly>& cc) {
+    if (capture.record.ring_dim != 0) return;
     const auto rns = std::dynamic_pointer_cast<lbcrypto::CryptoParametersRNS>(cc->GetCryptoParameters());
     if (!rns) throw std::runtime_error("only RNS schemes are supported");
     binding::BindingRecord record;
@@ -88,146 +79,108 @@ void set_params(const lbcrypto::CryptoContext<DCRTPoly>& cc) {
     add_towers(rns->GetParamsP());
     if (record.moduli.size() > UINT16_MAX) throw std::runtime_error("more than 65535 moduli");
     std::unordered_map<std::uint64_t, std::uint16_t> index;
-    for (std::size_t k = 0; k < record.moduli.size(); ++k)
-        index.emplace(record.moduli[k], static_cast<std::uint16_t>(k));
-    c.record = std::move(record);
-    c.modulus_index = std::move(index);
+    for (std::size_t k = 0; k < record.moduli.size(); ++k) index.emplace(record.moduli[k], static_cast<std::uint16_t>(k));
+    capture.record = std::move(record);
+    capture.modulus_index = std::move(index);
 }
 
-// --- The walk -------------------------------------------------------------------
-//
-// Which big polynomial of an object is number 0, 1, ...: this MUST match the
-// Object layout section of docs/BINDING_RECORD.md, which every producer of an
-// upload follows. Temporary: it moves, with the recorder, to the OpenFHE
-// adapter's trace library.
-
-using BigPolys = std::vector<const DCRTPoly*>;
-
-/// A ciphertext c_0 ... c_k: big polynomial i is c_i.
-BigPolys big_polys(const lbcrypto::Ciphertext<DCRTPoly>& ct) {
-    BigPolys out;
-    for (const auto& element : ct->GetElements()) out.push_back(&element);
-    return out;
-}
-
-/// A key-switching key of d digits, row by row: 2j is b_j, 2j + 1 is a_j.
-BigPolys big_polys(const lbcrypto::EvalKey<DCRTPoly>& key) {
-    const auto& b = key->GetBVector();
-    const auto& a = key->GetAVector();
-    if (a.size() != b.size()) throw std::runtime_error("a key with unequal A and B digit counts");
-    BigPolys out;
-    for (std::size_t j = 0; j < b.size(); ++j) {
-        out.push_back(&b[j]);
-        out.push_back(&a[j]);
-    }
-    return out;
-}
-
-// -----------------------------------------------------------------------------
-
-// Records `label` from its big polynomials: every tower the trace reads is a
-// limb at its address; a tower it never reads lies in no run. Replaces an
-// object of the same label.
-void add_object(const std::string& label, Kind kind, const BigPolys& polys) {
-    auto& c = capture();
-    if (polys.size() > UINT16_MAX) throw std::runtime_error(label + " has more than 65535 big polynomials");
+// Records `label`, of `big_polys` big polynomials, from the towers the walk
+// gave addresses; replaces an object of the same label.
+void add_object(BindingCapture& capture, const std::string& label, Kind kind, std::size_t big_polys,
+                const ObjectTowers& towers) {
+    if (big_polys > UINT16_MAX) throw std::runtime_error(label + " has more than 65535 big polynomials");
     std::vector<binding::Limb> limbs;
-    for (std::size_t i = 0; i < polys.size(); ++i) {
-        for (const auto& tower : polys[i]->GetAllElements()) {
-            const std::uint64_t address = lookup_fhetch_address(tower.GetId());
-            if (address == kNoAddress) continue;
-            const std::uint64_t q = tower.GetModulus().ConvertToInt();
-            const auto it = c.modulus_index.find(q);
-            if (it == c.modulus_index.end())
-                throw std::runtime_error(label + " has modulus " + std::to_string(q) +
-                                         ", which is not among the program's moduli");
-            limbs.push_back(binding::Limb{static_cast<std::uint16_t>(i), it->second, address});
-        }
+    limbs.reserve(towers.towers.size());
+    for (const auto& tower : towers.towers) {
+        const auto it = capture.modulus_index.find(tower.modulus);
+        if (it == capture.modulus_index.end())
+            throw std::runtime_error(label + " has modulus " + std::to_string(tower.modulus) +
+                                     ", which is not among the program's moduli");
+        limbs.push_back(binding::Limb{static_cast<std::uint16_t>(tower.big_poly), it->second, tower.address});
     }
-    c.record.remove_object(label);
-    c.record.add_object(label, kind, static_cast<std::uint16_t>(polys.size()), limbs);
-}
-
-// The client's key tag: the first tagged input's, or the only one registered.
-std::string client_key_tag() {
-    if (!capture().key_tag.empty()) return capture().key_tag;
-    using CC = lbcrypto::CryptoContextImpl<DCRTPoly>;
-    std::set<std::string> tags;
-    for (const auto& entry : CC::GetAllEvalMultKeys()) tags.insert(entry.first);
-    for (const auto& entry : CC::GetAllEvalAutomorphismKeys()) tags.insert(entry.first);
-    if (tags.size() > 1)
-        throw std::runtime_error(std::to_string(tags.size()) + " key tags and no tagged input to choose the client's");
-    return tags.empty() ? std::string() : *tags.begin();
+    capture.record.remove_object(label);
+    capture.record.add_object(label, kind, static_cast<std::uint16_t>(big_polys), limbs);
 }
 
 }  // namespace
 
-void capture_binding_input(const std::string& name, const lbcrypto::Ciphertext<DCRTPoly>& ct) {
-    guarded("input", [&] {
-        set_params(ct->GetCryptoContext());
+void capture_binding_input(const std::string& name, const lbcrypto::Ciphertext<DCRTPoly>& ct,
+                           const ObjectTowers& towers) {
+    guarded("input", [&](BindingCapture& capture) {
+        set_params(capture, ct->GetCryptoContext());
         // The client is whoever encrypted the inputs: its keys are the ones to bind.
-        if (capture().key_tag.empty()) capture().key_tag = ct->GetKeyTag();
-        add_object(binding::make_label(Kind::Input, name), Kind::Input, big_polys(ct));
+        if (capture.key_tag.empty()) capture.key_tag = ct->GetKeyTag();
+        add_object(capture, binding::make_label(Kind::Input, name), Kind::Input, ct->GetElements().size(), towers);
     });
 }
 
-void capture_binding_output(const std::string& name, const lbcrypto::Ciphertext<DCRTPoly>& ct) {
-    guarded("output", [&] {
-        set_params(ct->GetCryptoContext());
+void capture_binding_output(const std::string& name, const lbcrypto::Ciphertext<DCRTPoly>& ct,
+                            const ObjectTowers& towers) {
+    guarded("output", [&](BindingCapture& capture) {
+        set_params(capture, ct->GetCryptoContext());
         const auto label = binding::make_label(Kind::Output, name);
-        add_object(label, Kind::Output, big_polys(ct));
-        capture().metadata.set(binding::OutputMetadataEntry{label, ct->GetScalingFactor(),
-                                                            static_cast<std::uint32_t>(ct->GetNoiseScaleDeg()),
-                                                            ct->GetSlots()});
+        add_object(capture, label, Kind::Output, ct->GetElements().size(), towers);
+        capture.metadata.set(binding::OutputMetadataEntry{label, ct->GetScalingFactor(),
+                                                          static_cast<std::uint32_t>(ct->GetNoiseScaleDeg()),
+                                                          ct->GetSlots()});
     });
 }
 
-void capture_binding_keys(const lbcrypto::CryptoContext<DCRTPoly>& cc) {
-    guarded("keys", [&] {
-        set_params(cc);
-        const std::string tag = client_key_tag();
-        if (tag.empty()) return;
+std::optional<std::string> binding_key_tag() {
+    std::optional<std::string> tag;
+    guarded("keys", [&](BindingCapture& capture) {
+        if (!capture.key_tag.empty()) {
+            tag = capture.key_tag;
+            return;
+        }
         using CC = lbcrypto::CryptoContextImpl<DCRTPoly>;
-        const auto& mult = CC::GetAllEvalMultKeys();
-        // Entry i relinearizes the s^(i+2) component (EvalMultKeysGen): key:relin, key:relin:3, ...
-        if (const auto it = mult.find(tag); it != mult.end())
-            for (std::size_t i = 0; i < it->second.size(); ++i)
-                guarded("key:relin", [&] {
-                    add_object(binding::relin_key_label(static_cast<std::uint32_t>(i + 2)), Kind::Key,
-                               big_polys(it->second[i]));
-                });
-        const auto& autos = CC::GetAllEvalAutomorphismKeys();
-        if (const auto it = autos.find(tag); it != autos.end() && it->second)
-            for (const auto& [galois, key] : *it->second)
-                guarded("key:galois", [&, g = galois, k = key] {
-                    add_object(binding::make_label(Kind::Key, "galois:" + std::to_string(g)), Kind::Key, big_polys(k));
-                });
+        std::set<std::string> tags;
+        for (const auto& entry : CC::GetAllEvalMultKeys()) tags.insert(entry.first);
+        for (const auto& entry : CC::GetAllEvalAutomorphismKeys()) tags.insert(entry.first);
+        if (tags.size() > 1)
+            throw std::runtime_error(std::to_string(tags.size()) + " key tags and no tagged input to choose the client's");
+        if (!tags.empty()) tag = *tags.begin();
+    });
+    return tag;
+}
+
+void capture_binding_key(const lbcrypto::CryptoContext<DCRTPoly>& cc, const std::string& label,
+                         const lbcrypto::EvalKey<DCRTPoly>& key, const ObjectTowers& towers) {
+    guarded("keys", [&](BindingCapture& capture) {
+        set_params(capture, cc);
+        const auto digits = key->GetBVector().size();
+        if (key->GetAVector().size() != digits) throw std::runtime_error(label + " has unequal A and B digit counts");
+        add_object(capture, label, Kind::Key, 2 * digits, towers);
     });
 }
 
-BindingFiles write_binding_files(const std::filesystem::path& dir, const std::string& prog) {
-    BindingFiles out;
-    const auto& c = capture();
-    // Writes `doc` as <prog><ext> when it has content; removes a stale file otherwise.
-    const auto write = [&](const char* what, bool has_content, const std::string& name, const auto& doc) {
-        std::string written;
-        guarded(what, [&] {
-            const auto path = dir / name;
-            if (has_content) {
-                doc.write(path);
-                written = name;
-            } else {
-                std::error_code ec;
-                std::filesystem::remove(path, ec);  // best effort
-            }
-        });
-        return written;
+BindingFiles write_binding_files(const BindingCapture& capture, const std::filesystem::path& dir,
+                                 const std::string& prog) {
+    const auto record_path = dir / (prog + ".nbbr");
+    const auto metadata_path = dir / (prog + ".nbom");
+    const auto remove_both = [&] {
+        std::error_code ec;
+        std::filesystem::remove(record_path, ec);  // best effort
+        std::filesystem::remove(metadata_path, ec);
     };
-    out.binding_record = write("write", !c.record.objects.empty(), prog + ".nbbr", c.record);
-    out.output_metadata = write("write output metadata", !c.metadata.entries.empty(), prog + ".nbom", c.metadata);
+    remove_both();
+    if (capture.failed) return {};
+    BindingFiles out;
+    try {
+        if (!capture.record.objects.empty()) {
+            capture.record.write(record_path);
+            out.binding_record = record_path.filename().string();
+        }
+        if (!capture.metadata.entries.empty()) {
+            capture.metadata.write(metadata_path);
+            out.output_metadata = metadata_path.filename().string();
+        }
+    } catch (const std::exception& e) {
+        warn(std::string("write: ") + e.what() + "; the recording gets no binding record");
+        remove_both();
+        return {};
+    }
     return out;
 }
-
-void clear_binding_capture() { capture() = Capture{}; }
 
 }  // namespace niobium::detail

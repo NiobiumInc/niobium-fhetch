@@ -21,12 +21,13 @@
 #include <nbbf/nbbf.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <set>
-#include <span>
+#include <system_error>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -149,10 +150,10 @@ BindResult bind_upload(const BindingRecord& record, Kind kind, const nbbf::FileV
     return bind_checked(record, kind, file.layout(), index);
 }
 
-BindResult bind_upload(const BindingRecord& record, Kind kind, std::span<const std::byte> header_region,
-                const nbbf::Layout& layout, const nbbf::LabelIndex& index) {
+BindResult bind_upload(const BindingRecord& record, Kind kind, const nbbf::Sha256& header_digest,
+                       const nbbf::Layout& layout, const nbbf::LabelIndex& index) {
     reject_output(kind);
-    check_index(index.check_against(header_region, layout));
+    check_index(index.check_against(header_digest, layout));
     return bind_checked(record, kind, layout, index);
 }
 
@@ -177,6 +178,16 @@ std::vector<OutputObject> output_limbs(const BindingRecord& record) {
 
 void write_result(const BindingRecord& record, const OutputMetadata& metadata, const ResidueSource& residues,
                   const std::filesystem::path& dir) {
+    // No file of an earlier run may outlive a failure here next to new ones.
+    const std::array<const char*, 3> names{"result.nbbf", "result.nbli", "result.nbom"};
+    const auto staging = dir / ".result.staging";
+    const auto remove_all = [&] {
+        std::error_code ec;  // best effort
+        for (const auto* name : names) std::filesystem::remove(dir / name, ec);
+        std::filesystem::remove_all(staging, ec);
+    };
+    remove_all();
+
     const auto objects = output_limbs(record);
 
     // The file declares only the primes the outputs use, in the record's order.
@@ -193,7 +204,7 @@ void write_result(const BindingRecord& record, const OutputMetadata& metadata, c
     }
 
     nbbf::Builder builder(moduli, roots);
-    nbbf::LabelIndexBuilder labels;
+    std::vector<nbbf::LabelIndex::Entry> labels;
     OutputMetadata result_metadata;
     std::uint32_t first_poly = 0;
     for (const auto& object : objects) {
@@ -211,16 +222,24 @@ void write_result(const BindingRecord& record, const OutputMetadata& metadata, c
             builder.add_block(first_poly + limb.big_poly, file_index[limb.modulus_index], std::move(values), kDomain,
                               kOrder);
         }
-        labels.add(object.label, first_poly, object.poly_count);
+        labels.push_back({.label = object.label, .first_poly = first_poly, .poly_count = object.poly_count});
         first_poly += object.poly_count;
         result_metadata.entries.push_back(*entry);
     }
 
-    std::filesystem::create_directories(dir);
-    const auto plan = builder.plan().value();
-    builder.write(dir / "result.nbbf").value();
-    labels.write(dir / "result.nbli", nbbf::header_digest(plan)).value();
-    result_metadata.write(dir / "result.nbom");
+    // Written into a staging directory beside the result, then moved in.
+    try {
+        std::filesystem::create_directories(staging);
+        const auto plan = builder.plan().value();
+        builder.write(staging / names[0]).value();
+        nbbf::LabelIndex::make(nbbf::header_digest(plan), std::move(labels)).value().write(staging / names[1]).value();
+        result_metadata.write(staging / names[2]);
+        for (const auto* name : names) std::filesystem::rename(staging / name, dir / name);
+        std::filesystem::remove(staging);
+    } catch (...) {
+        remove_all();
+        throw;
+    }
 }
 
 }  // namespace niobium::binding

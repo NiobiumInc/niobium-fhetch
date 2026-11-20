@@ -8,10 +8,8 @@
 #pragma once
 
 #include "niobium/compiler.h"
-#include "niobium/fhetch_recording.h"
 #include "niobium/trace_writer.h"
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <string>
 #include <unordered_set>
@@ -23,9 +21,6 @@ namespace niobium::detail {
 // downstream libraries don't need this private header to consume them.
 using niobium::CapturedInputRecord;
 using niobium::CapturedShape;
-
-// trace_writer(), montgomery_mode(), bit_reversal_mode() and
-// polynomial_address(): niobium/fhetch_recording.h (the IR builder's core).
 
 /// Look up the FHETCH address for an OpenFHE polynomial ID.
 /// Returns (uint64_t)-1 if not found.
@@ -71,21 +66,6 @@ void sync_fhetch_state_to_compiler();
 /// here.
 void save_dcrt_poly_as_input(const void* dcrt_poly_ptr);
 
-/// The files write_binding_files wrote, relative to its directory; empty
-/// for one it did not write.
-struct BindingFiles {
-    std::string binding_record;   ///< <prog>.nbbr
-    std::string output_metadata;  ///< <prog>.nbom
-};
-
-/// Writes the recording's binding record and output metadata
-/// (docs/BINDING_RECORD.md), captured as inputs, outputs and keys were tagged
-/// (binding_capture.h), into `dir`. Each is written only when it has content;
-/// a failure warns and leaves that name empty. Defined in binding_capture.cpp,
-/// so this file stays free of OpenFHE headers.
-BindingFiles write_binding_files(const std::filesystem::path& dir, const std::string& prog);
-void clear_binding_capture();
-
 /// Iterate captured inputs, once per record (shape + addr_ids +
 /// per-residue values).
 void for_each_captured_input(const std::function<void(const CapturedInputRecord&)>& cb);
@@ -94,18 +74,5 @@ void for_each_captured_input(const std::function<void(const CapturedInputRecord&
 /// materialized at recording time, so name + shape only.
 void for_each_captured_output(
     const std::function<void(const std::string&, const CapturedShape&)>& cb);
-
-}  // namespace niobium::detail
-
-// Forward-declare the opaque Polynomial struct so we can return its
-// synthetic FHETCH address without exposing the full implementation.
-namespace niobium::fhetch { class Polynomial; }
-
-namespace niobium::detail {
-
-/// Retrieve the synthetic FHETCH address assigned to a niobium::fhetch::Polynomial.
-/// Used by translation units (e.g. fhetch_parser.cpp) that need to call
-/// Compiler::store_input_element with the Polynomial's own address without
-/// reaching into PolynomialImpl's internal layout.
 
 }  // namespace niobium::detail

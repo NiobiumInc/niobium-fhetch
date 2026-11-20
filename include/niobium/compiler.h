@@ -42,7 +42,9 @@ namespace niobium {
 /// four overloads in fhetch_api.h.
 enum class CapturedKind : uint8_t { SRP, MRP, SRPArray, MRPArray };
 
-// TraceFormat: niobium/trace_writer.h.
+namespace detail {
+struct BindingFiles;
+}  // namespace detail
 
 /// Per-record shape returned by the for_each_captured_* helpers in
 /// compiler_internal.h. per_element_moduli has size 1 for SRP / MRP
@@ -439,7 +441,7 @@ class Compiler {
                           const std::string &source_path);
 
   private:
-    void write_replay_json();
+    void write_replay_json(const detail::BindingFiles& binding_files);
     void write_replay_outputs();
 
     /// Hand the recorded fhetch project off to the compiler-side

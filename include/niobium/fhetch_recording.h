@@ -15,18 +15,28 @@
  * TraceWriter and keeps the inputs and outputs tagged with tag_input /
  * tag_output in registries. It knows nothing of the recorder that drives it:
  * a recorder starts and writes the trace through trace_writer(), and copies
- * the registries into its own capture (resolving each single-residue input's
- * modulus with address_moduli()).
+ * the registries into its own capture residue by residue (for_each_residue).
  *
- * Part of the recorder-free core (nbfhetch_core).
+ * Part of the recorder-free core (nbfhetch_core). A program that links the
+ * core without the recorder, over the instrumented OpenFHE, must define the
+ * hook that OpenFHE calls while it loads, as the recorder does:
+ *
+ *     extern "C" void openfhe_cporbe_with_openmp(bool) {}
+ *
+ * The recorder's other hooks that OpenFHE references are never called without
+ * a recorder; with GNU ld, such a program links with -Wl,--allow-shlib-undefined.
  */
 #pragma once
 
+#include "niobium/compiler.h"
 #include "niobium/fhetch_api.h"
 
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace niobium {
@@ -35,33 +45,35 @@ class TraceWriter;
 
 namespace niobium::fhetch::recording {
 
-/// One tag_input or tag_output call: which of the four overloads, and its value.
+/// One tag_input or tag_output call: its name, and the value of whichever of
+/// the four overloads it was.
 struct TaggedEntry {
     std::string name;
-    enum Kind : std::uint8_t { POLY, MRP_KIND, MRPA, SRPA } kind = POLY;
-    Polynomial poly;
-    MRP mrp;
-    MRPArray mrpa;
-    SRPArray srpa;
-    /// Set for a trace driver's live-in (tag_input_values): the input's modulus
-    /// and values are known, so a recorder stores them as given, ahead of the
-    /// registry's other inputs, instead of resolving them.
-    bool explicit_values = false;
-    std::uint64_t modulus = 0;
-    std::vector<std::uint64_t> values;
+    std::variant<Polynomial, MRP, MRPArray, SRPArray> value;
 };
 
 /// The tagged inputs and outputs, in tagging order. Cleared by reset_for_epoch().
 const std::vector<TaggedEntry>& tagged_inputs();
 const std::vector<TaggedEntry>& tagged_outputs();
 
-/// Tags single-residue input `p` whose modulus and values are already known.
-void tag_input_values(const std::string& name, const Polynomial& p, std::uint64_t modulus,
-                      std::vector<std::uint64_t> values);
+/// One residue of a tagged entry.
+struct TaggedResidue {
+    CapturedKind kind;        ///< which overload tagged it
+    bool starts_new_element;  ///< the first residue of an array's element
+    const Polynomial* poly;   ///< never null
+    /// An MRP's prime for this residue; for a single-residue polynomial, the
+    /// modulus address_moduli() holds for it, if any.
+    std::optional<std::uint64_t> modulus;
+};
 
-/// Address -> modulus of every polynomial a modulus-bearing instruction has
-/// used (the first real modulus wins over the copy sentinel). Cleared by
-/// reset_for_epoch() and clear_address_moduli().
+/// Calls `f` for every valid residue of `entry`, in the order a recorder
+/// stores them: a polynomial itself, an MRP's residues in base order, an
+/// array's element by element.
+void for_each_residue(const TaggedEntry& entry, const std::function<void(const TaggedResidue&)>& f);
+
+/// Address -> modulus of every polynomial a modulus-bearing instruction (or
+/// bind_modulus) has named (the first real modulus wins over the copy
+/// sentinel). Cleared by reset_for_epoch() and clear_address_moduli().
 const std::unordered_map<std::uintptr_t, std::uint64_t>& address_moduli();
 void clear_address_moduli();
 
@@ -73,25 +85,10 @@ std::uint64_t registry_generation();
 /// `p`'s values, or zeros of its ring dimension when it holds none.
 std::vector<std::uint64_t> values_or_zeros(const Polynomial& p);
 
-}  // namespace niobium::fhetch::recording
-
-namespace niobium::detail {
-
 /// The process-wide TraceWriter every IR builder call records into.
 TraceWriter& trace_writer();
 
-/// Data-format toggles a recorder sets (its --montgomery / --bit_reversal /
-/// --niobium_hw flags); the IR builder reads them to choose Montgomery-form
-/// immediates and the hardware switchmodulus lowering.
-struct RecordingModes {
-    bool montgomery = false;
-    bool bit_reversal = false;
-};
-RecordingModes& recording_modes();
-inline bool montgomery_mode() { return recording_modes().montgomery; }
-inline bool bit_reversal_mode() { return recording_modes().bit_reversal; }
-
 /// The FHETCH address of `p`, or all bits set for an invalid polynomial.
-std::uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p);
+std::uintptr_t polynomial_address(const Polynomial& p);
 
-}  // namespace niobium::detail
+}  // namespace niobium::fhetch::recording

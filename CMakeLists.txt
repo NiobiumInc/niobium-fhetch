@@ -140,79 +140,58 @@ endif()
 # writes them; bind (nbfhetch_binding, below) is the opt-in C++20/nbbf part.
 # ==============================================================================
 
-# Compiled once, as objects: they make up the static nbfhetch_formats, and they
-# are compiled into libnbfhetch itself, so libnbfhetch (shared or static, and a
-# consumer that links its archive by path) needs no second library.
-add_library(nbfhetch_formats_objects OBJECT
+# niobium_object_archive(<name> <export_name> SOURCES ...): the sources compiled
+# once, as the OBJECT library <name>_objects, and the static archive <name> of
+# those objects, exported as Niobium::<export_name>. libnbfhetch compiles in the
+# same objects, so it (shared or static, and a consumer that links its archive
+# by path) needs no second library, and holds one copy of any process-wide state.
+function(niobium_object_archive name export_name)
+  cmake_parse_arguments(ARG "" "" "SOURCES" ${ARGN})
+  add_library(${name}_objects OBJECT ${ARG_SOURCES})
+  set_target_properties(${name}_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_compile_features(${name}_objects PUBLIC cxx_std_17)
+  target_include_directories(${name}_objects PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+  add_library(${name} STATIC $<TARGET_OBJECTS:${name}_objects>)
+  add_library(Niobium::${export_name} ALIAS ${name})
+  set_target_properties(${name} PROPERTIES
+      OUTPUT_NAME "${name}"
+      EXPORT_NAME "${export_name}"
+      POSITION_INDEPENDENT_CODE ON)
+  target_compile_features(${name} PUBLIC cxx_std_17)
+  target_include_directories(${name} PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:include>)
+endfunction()
+
+niobium_object_archive(nbfhetch_formats fhetch_formats SOURCES
     src/formats/binding_record.cpp
     src/formats/file_io.cpp
     src/formats/output_metadata.cpp
 )
-set_target_properties(nbfhetch_formats_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_compile_features(nbfhetch_formats_objects PUBLIC cxx_std_17)
-target_include_directories(nbfhetch_formats_objects PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-
-add_library(nbfhetch_formats STATIC $<TARGET_OBJECTS:nbfhetch_formats_objects>)
-add_library(Niobium::fhetch_formats ALIAS nbfhetch_formats)
-set_target_properties(nbfhetch_formats PROPERTIES
-    OUTPUT_NAME "nbfhetch_formats"
-    EXPORT_NAME "fhetch_formats"
-    POSITION_INDEPENDENT_CODE ON
-)
-target_compile_features(nbfhetch_formats PUBLIC cxx_std_17)
-target_include_directories(nbfhetch_formats PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>)
 
 # ==============================================================================
 # Recorder-free core (nbfhetch_core)
 # ==============================================================================
 #
-# Compiled once, as objects: they make up the static nbfhetch_core (installed
-# for find_package(NiobiumFhetchCore), so a recorder elsewhere can link the IR
-# builder without a second niobium::compiler()), and they are compiled into
-# libnbfhetch itself, which therefore holds exactly what it held before and one
-# copy of the IR builder's process-wide state.
+# The static nbfhetch_core is installed for find_package(NiobiumFhetchCore), so
+# a recorder elsewhere can link the IR builder without a second
+# niobium::compiler(); libnbfhetch therefore holds exactly what it held before.
 
-add_library(nbfhetch_core_objects OBJECT ${CORE_SOURCES})
-set_target_properties(nbfhetch_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_compile_features(nbfhetch_core_objects PUBLIC cxx_std_17)
-target_include_directories(nbfhetch_core_objects
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/fhetch_sim
-        ${JSON_INCLUDE_DIR}
-        ${OPENFHE_INCLUDE_DIRS})
+niobium_object_archive(nbfhetch_core fhetch_core SOURCES ${CORE_SOURCES})
+target_include_directories(nbfhetch_core_objects PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/fhetch_sim
+    ${JSON_INCLUDE_DIR}
+    ${OPENFHE_INCLUDE_DIRS})
 # The same definition libnbfhetch is compiled with, so the OpenFHE headers the
 # simulator includes expand identically in both; it adds no hook reference
 # there (tests/fhetch_core checks the core's undefined symbols).
 target_compile_definitions(nbfhetch_core_objects PRIVATE OPENFHE_CPROBES)
 target_link_libraries(nbfhetch_core_objects PUBLIC nbfhetch_formats)
 
-add_library(nbfhetch_core STATIC $<TARGET_OBJECTS:nbfhetch_core_objects>)
-add_library(Niobium::fhetch_core ALIAS nbfhetch_core)
-set_target_properties(nbfhetch_core PROPERTIES
-    OUTPUT_NAME "nbfhetch_core"
-    EXPORT_NAME "fhetch_core"
-    POSITION_INDEPENDENT_CODE ON
-)
-target_compile_features(nbfhetch_core PUBLIC cxx_std_17)
-target_include_directories(nbfhetch_core PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>)
 find_package(Threads REQUIRED)
 target_link_directories(nbfhetch_core PUBLIC $<BUILD_INTERFACE:${OPENFHE_LIBRARY_PATH}>)
 target_link_libraries(nbfhetch_core PUBLIC nbfhetch_formats ${OPENFHE_CORE_LIBRARY} Threads::Threads)
-# The instrumented shared libOPENFHEcore leaves the recorder's cprobe hooks
-# undefined, and a process with no recorder never calls them (it defines only
-# the load-time openfhe_cporbe_with_openmp, as tests/fhetch_core does). macOS
-# binds them lazily; GNU ld refuses an executable over a shared library with
-# undefined references unless told they are left for run time.
-if(NOT APPLE AND NOT NIOBIUM_FHETCH_OPENFHE_STATIC)
-  target_link_options(nbfhetch_core INTERFACE "LINKER:--allow-shlib-undefined")
-endif()
 
 # ==============================================================================
 # Library target

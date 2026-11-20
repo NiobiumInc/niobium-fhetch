@@ -61,13 +61,13 @@ void check(bool ok, const std::string& what) {
 
 constexpr std::uint64_t kNoAddress = ~std::uint64_t{0};
 
-lbcrypto::CryptoContext<DCRTPoly> make_context() {
+lbcrypto::CryptoContext<DCRTPoly> make_context(std::uint32_t first_mod_size = 60) {
     lbcrypto::CCParams<lbcrypto::CryptoContextCKKSRNS> p;
     p.SetSecurityLevel(lbcrypto::HEStd_NotSet);
     p.SetRingDim(1U << 11U);
     p.SetMultiplicativeDepth(2);
     p.SetScalingModSize(50);
-    p.SetFirstModSize(60);
+    p.SetFirstModSize(first_mod_size);
     p.SetBatchSize(8);
     auto cc = lbcrypto::GenCryptoContext(p);
     cc->Enable(lbcrypto::PKE);
@@ -238,6 +238,27 @@ int main() {
     const auto empty = compiler.program_name();
     check(!std::filesystem::exists(empty_dir / (empty + ".nbbr")) && !std::filesystem::exists(empty_dir / (empty + ".nbom")),
           "after reset, a recording with nothing tagged writes neither file");
+
+    // A capture that fails (here an input under moduli the program does not
+    // have) writes neither file, and removes an earlier recording's.
+    compiler.reset();
+    compiler.set_program_info("binding_capture_failed", "1.0", "an input under other moduli");
+    compiler.set_program_directory(dir / "failed");
+    const auto failed_dir = compiler.get_program_directory();
+    const auto failed = compiler.program_name();
+    std::filesystem::create_directories(failed_dir);
+    std::ofstream(failed_dir / (failed + ".nbbr")) << "an earlier recording's";
+    auto other_cc = make_context(59);
+    auto other_kp = other_cc->KeyGen();
+    auto z = other_cc->Encrypt(other_kp.publicKey, other_cc->MakeCKKSPackedPlaintext(xs));
+    compiler.tag_input("x", x);
+    compiler.tag_input("z", z);
+    compiler.start();
+    compiler.probe("y", y);
+    compiler.stop();
+    check(!std::filesystem::exists(failed_dir / (failed + ".nbbr")) &&
+              !std::filesystem::exists(failed_dir / (failed + ".nbom")),
+          "a failed capture writes neither file and removes stale ones");
 
     std::filesystem::remove_all(dir);
     std::cout << g_passed << " passed, " << g_failed << " failed\n";

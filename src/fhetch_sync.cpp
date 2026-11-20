@@ -9,10 +9,8 @@
 
 #include "compiler_internal.h"
 #include "niobium/compiler.h"
-#include "niobium/fhetch_api.h"
 #include "niobium/fhetch_recording.h"
 
-#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -39,137 +37,29 @@ void clear_recording_registries() noexcept {
 }
 
 void sync_fhetch_state_to_compiler() {
-    using namespace niobium::fhetch;
-    using recording::TaggedEntry;
+    namespace recording = niobium::fhetch::recording;
     const auto generation = recording::registry_generation();
     if (g_synced_generation == generation) return;
     g_synced_generation = generation;
 
     auto& cc = niobium::compiler();
-    const auto& mod_map = recording::address_moduli();
-
-    // ---- Inputs ----
-    // A trace driver's live-ins come first, as given: the driver used to store
-    // them straight into the Compiler as it met them, ahead of this copy.
-    for (const auto& e : recording::tagged_inputs()) {
-        if (!e.explicit_values) continue;
-        cc.store_input_element(e.name, niobium::CapturedKind::SRP,
-                               /*starts_new_element=*/false,
-                               niobium::detail::polynomial_address(e.poly), e.modulus, e.values);
+    // An input no modulus-bearing instruction used (and no bind_modulus named)
+    // has no modulus to load it under, so it is left out.
+    for (const auto& entry : recording::tagged_inputs()) {
+        recording::for_each_residue(entry, [&](const recording::TaggedResidue& r) {
+            if (!r.modulus) return;
+            cc.store_input_element(entry.name, r.kind, r.starts_new_element,
+                                   recording::polynomial_address(*r.poly), *r.modulus,
+                                   recording::values_or_zeros(*r.poly));
+        });
     }
-    for (const auto& e : recording::tagged_inputs()) {
-        if (e.explicit_values) continue;
-        switch (e.kind) {
-        case TaggedEntry::POLY: {
-            if (!e.poly.is_valid()) break;
-            const auto address = niobium::detail::polynomial_address(e.poly);
-            auto it = mod_map.find(address);
-            if (it == mod_map.end()) break;  // never used in a modulus-bearing op
-            cc.store_input_element(e.name, niobium::CapturedKind::SRP,
-                                   /*starts_new_element=*/false,
-                                   address, it->second,
-                                   recording::values_or_zeros(e.poly));
-            break;
-        }
-        case TaggedEntry::MRP_KIND:
-            if (e.mrp.is_valid()) {
-                for (auto q : e.mrp.base()) {
-                    const auto& res = e.mrp[q];
-                    if (!res.is_valid()) continue;
-                    cc.store_input_element(e.name, niobium::CapturedKind::MRP,
-                                           /*starts_new_element=*/false,
-                                           niobium::detail::polynomial_address(res), q,
-                                           recording::values_or_zeros(res));
-                }
-            }
-            break;
-        case TaggedEntry::MRPA:
-            if (e.mrpa.is_valid()) {
-                for (size_t i = 0; i < e.mrpa.length(); ++i) {
-                    const auto& m = e.mrpa[i];
-                    bool first = true;
-                    for (auto q : m.base()) {
-                        const auto& res = m[q];
-                        if (!res.is_valid()) continue;
-                        cc.store_input_element(e.name, niobium::CapturedKind::MRPArray,
-                                               /*starts_new_element=*/first,
-                                               niobium::detail::polynomial_address(res), q,
-                                               recording::values_or_zeros(res));
-                        first = false;
-                    }
-                }
-            }
-            break;
-        case TaggedEntry::SRPA:
-            if (e.srpa.is_valid()) {
-                for (size_t i = 0; i < e.srpa.length(); ++i) {
-                    const auto& p = e.srpa[i];
-                    if (!p.is_valid()) continue;
-                    const auto address = niobium::detail::polynomial_address(p);
-                    auto it = mod_map.find(address);
-                    if (it == mod_map.end()) continue;
-                    cc.store_input_element(e.name, niobium::CapturedKind::SRPArray,
-                                           /*starts_new_element=*/true,
-                                           address, it->second,
-                                           recording::values_or_zeros(p));
-                }
-            }
-            break;
-        }
-    }
-
-    // ---- Outputs ----
-    // Outputs without a known modulus still get recorded (modulus=0) so
+    // An output without a known modulus is still recorded (modulus 0), so
     // downstream consumers can at least emit a template.
-    auto modulus_for = [&](const Polynomial& p) -> uint64_t {
-        auto it = mod_map.find(niobium::detail::polynomial_address(p));
-        return (it == mod_map.end()) ? 0 : it->second;
-    };
-
-    for (const auto& e : recording::tagged_outputs()) {
-        switch (e.kind) {
-        case TaggedEntry::POLY:
-            if (e.poly.is_valid()) {
-                cc.store_output_probe(e.name, niobium::CapturedKind::SRP,
-                                      /*starts_new_element=*/false,
-                                      niobium::detail::polynomial_address(e.poly), modulus_for(e.poly));
-            }
-            break;
-        case TaggedEntry::MRP_KIND:
-            if (e.mrp.is_valid()) {
-                for (auto q : e.mrp.base()) {
-                    cc.store_output_probe(e.name, niobium::CapturedKind::MRP,
-                                          /*starts_new_element=*/false,
-                                          niobium::detail::polynomial_address(e.mrp[q]), q);
-                }
-            }
-            break;
-        case TaggedEntry::MRPA:
-            if (e.mrpa.is_valid()) {
-                for (size_t i = 0; i < e.mrpa.length(); ++i) {
-                    const auto& m = e.mrpa[i];
-                    bool first = true;
-                    for (auto q : m.base()) {
-                        cc.store_output_probe(e.name, niobium::CapturedKind::MRPArray,
-                                              /*starts_new_element=*/first,
-                                              niobium::detail::polynomial_address(m[q]), q);
-                        first = false;
-                    }
-                }
-            }
-            break;
-        case TaggedEntry::SRPA:
-            if (e.srpa.is_valid()) {
-                for (size_t i = 0; i < e.srpa.length(); ++i) {
-                    const auto& p = e.srpa[i];
-                    if (!p.is_valid()) continue;
-                    cc.store_output_probe(e.name, niobium::CapturedKind::SRPArray,
-                                          /*starts_new_element=*/true,
-                                          niobium::detail::polynomial_address(p), modulus_for(p));
-                }
-            }
-            break;
-        }
+    for (const auto& entry : recording::tagged_outputs()) {
+        recording::for_each_residue(entry, [&](const recording::TaggedResidue& r) {
+            cc.store_output_probe(entry.name, r.kind, r.starts_new_element,
+                                  recording::polynomial_address(*r.poly), r.modulus.value_or(0));
+        });
     }
 }
 

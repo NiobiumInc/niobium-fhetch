@@ -34,7 +34,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -101,9 +100,9 @@ struct BindResult {
 BindResult bind_upload(const BindingRecord& record, Kind kind, const nbbf::FileView& file,
                        const nbbf::LabelIndex& index);
 
-/// The same, for a caller that holds only the NBBF header region (its bytes
-/// [0, header_len)) and its Layout, such as a StreamReader's.
-BindResult bind_upload(const BindingRecord& record, Kind kind, std::span<const std::byte> header_region,
+/// The same, for a caller that holds only the NBBF file's header digest and
+/// Layout, such as a StreamReader's (nbbf::header_digest(reader), reader.layout()).
+BindResult bind_upload(const BindingRecord& record, Kind kind, const nbbf::Sha256& header_digest,
                        const nbbf::Layout& layout, const nbbf::LabelIndex& index);
 
 /// One limb of an output: read `address` back and write it as the block of
@@ -135,7 +134,9 @@ using ResidueSource = std::function<std::vector<std::uint64_t>(std::uint64_t add
 
 /// Writes every output of the record into `dir` as result.nbbf, result.nbli
 /// and result.nbom (docs/BINDING_RECORD.md, Result), creating `dir`. The
-/// NBBF declares only the primes the outputs use. Throws BindError
+/// NBBF declares only the primes the outputs use. The three are written
+/// beside `dir` first and moved in together; when this throws, `dir` holds
+/// none of them, not even an earlier run's. Throws BindError
 /// (MissingOutputMetadata, ResidueCountMismatch), nbbf::Exception (a residue
 /// out of range, a failed write) and whatever `residues` throws.
 void write_result(const BindingRecord& record, const OutputMetadata& metadata, const ResidueSource& residues,

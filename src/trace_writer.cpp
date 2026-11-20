@@ -226,11 +226,11 @@ void TraceWriter::clear() {
 
 }  // namespace niobium
 
-namespace niobium::detail {
+namespace niobium::fhetch::recording {
 
 TraceWriter& trace_writer() {
     static TraceWriter writer;
     return writer;
 }
 
-}  // namespace niobium::detail
+}  // namespace niobium::fhetch::recording

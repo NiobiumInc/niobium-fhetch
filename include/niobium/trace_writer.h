@@ -3,7 +3,7 @@
 //
 // Trace writer — records FHETCH operations and writes .fhex / .fhetch files.
 // Part of the recorder-free core (nbfhetch_core): the IR builder records into
-// one process-wide instance, niobium::detail::trace_writer()
+// one process-wide instance, niobium::fhetch::recording::trace_writer()
 // (niobium/fhetch_recording.h), which a recorder starts, stops and writes.
 
 #pragma once

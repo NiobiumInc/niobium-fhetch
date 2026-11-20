@@ -9,6 +9,7 @@
 
 #include "niobium/openfhe/probes.h"
 #include "niobium/compiler.h"
+#include "niobium/fhetch_recording.h"
 #include "compiler_internal.h"
 
 #include <algorithm>
@@ -105,7 +106,7 @@ using namespace niobium::fhetch;  // NOLINT(google-build-using-namespace) — FH
 
 // Register a modulus and return its table index.
 static uint32_t midx(uint64_t q) {
-    return niobium::detail::trace_writer().register_modulus(q);
+    return niobium::fhetch::recording::trace_writer().register_modulus(q);
 }
 
 // Build an instruction with its two mandatory operands. Addresses narrow to the
@@ -120,7 +121,7 @@ static Instruction ir(FhOpcode op, uintptr_t d, uintptr_t s1) {
 }
 
 static void emit(const Instruction& inst) {
-    niobium::detail::trace_writer().emit(inst);
+    niobium::fhetch::recording::trace_writer().emit(inst);
 }
 
 /// dest, src1, src2, m=
@@ -209,7 +210,7 @@ void openfhe_cprobe_resume_recording() {
 
 void openfhe_cprobe_annotate(const char* annotation) {
     if (!should_record()) return;
-    niobium::detail::trace_writer().comment(annotation);
+    niobium::fhetch::recording::trace_writer().comment(annotation);
 }
 
 // ============================================================================
@@ -589,7 +590,7 @@ void openfhe_cprobe_switchmodulus(uintptr_t dst, uintptr_t src,
 
     uintptr_t d = map_address(dst);
     uintptr_t s = map_address(src);
-    niobium::detail::trace_writer().comment(
+    niobium::fhetch::recording::trace_writer().comment(
         "switchmodulus %" + std::to_string(d) + ", %" + std::to_string(s) +
         ", old_mod=" + std::to_string(old_modulus) +
         ", new_mod=" + std::to_string(new_modulus));
