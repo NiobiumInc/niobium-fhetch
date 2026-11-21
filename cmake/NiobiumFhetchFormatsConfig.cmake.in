@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# Niobium::fhetch_formats: the binding record (.nbbr) and output metadata (.nbom)
+# formats (niobium/binding_record.h, niobium/output_metadata.h). C++17, no
+# dependencies.
+include("${CMAKE_CURRENT_LIST_DIR}/NiobiumFhetchFormatsTargets.cmake")
+check_required_components(NiobiumFhetchFormats)

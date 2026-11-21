@@ -133,3 +133,38 @@ set_openfhe_rpath(ntt_omega_test)
 add_executable(replay_out_test replay_out/test.cpp)
 target_link_libraries(replay_out_test PRIVATE niobium_fhetch)
 set_openfhe_rpath(replay_out_test)
+
+# ==============================================================================
+# The recorder-free core on its own: linked against nbfhetch_core only, so it
+# links only if the core needs no niobium::compiler(). check_symbols.py (run by
+# `make test-fhetch-core[-release]`) checks the archive's symbols as well.
+# ==============================================================================
+
+add_executable(fhetch_core_test fhetch_core/test.cpp)
+target_link_libraries(fhetch_core_test PRIVATE nbfhetch_core)
+set_openfhe_rpath(fhetch_core_test)
+# The instrumented shared libOPENFHEcore leaves the recorder's cprobe hooks
+# undefined, and this process, with no recorder, never calls them (it defines
+# only the load-time hook; see fhetch_recording.h). macOS binds them lazily; GNU
+# ld refuses an executable over a shared library with undefined references
+# unless told they are left for run time.
+if(NOT APPLE AND NOT NIOBIUM_FHETCH_OPENFHE_STATIC)
+  target_link_options(fhetch_core_test PRIVATE "LINKER:--allow-shlib-undefined")
+endif()
+
+# ==============================================================================
+# Binding record (.nbbr) and output metadata (.nbom) formats. C++17, no
+# dependencies: always built.
+# ==============================================================================
+
+add_executable(binding_formats_test binding_record/formats_test.cpp)
+target_link_libraries(binding_formats_test PRIVATE nbfhetch_formats)
+
+# ==============================================================================
+# The recorder writes the binding record and output metadata next to the trace.
+# ==============================================================================
+
+add_executable(binding_capture_test binding_capture/test.cpp)
+target_link_libraries(binding_capture_test PRIVATE niobium_fhetch)
+target_include_directories(binding_capture_test PRIVATE "${CMAKE_SOURCE_DIR}/src" ${JSON_INCLUDE_DIR})
+set_openfhe_rpath(binding_capture_test)

@@ -210,14 +210,18 @@ niobium-fhetch/
   include/
     niobium/
       fhetch_api.h            # Complete FHETCH instruction set
+      fhetch_recording.h      # What a recorder reads from the IR builder (nbfhetch_core),
+                              # and what a program linking the core alone must define
+      trace_writer.h          # trace emitter (.fhex binary, .fhetch text)
       compiler.h              # Session API
   src/
-    fhetch_api.cpp            # Instruction recording into .fhetch
+    fhetch_api.cpp            # Instruction recording into .fhetch (core)
+    trace_writer.cpp          # trace emitter (core)
     compiler.cpp              # Session lifecycle, replay orchestration
+    fhetch_sync.cpp           # Copies the IR builder's tags into the session
     compiler_internal.h       # Internal API between compiler/probes
     probes.cpp                # C-linkage openfhe_cprobe_* implementations
     auto_facade.cpp           # capture_crypto_context / tag_keys / tag_input
-    trace_writer.{h,cpp}      # trace emitter (.fhex binary, .fhetch text)
     cereal_io.h               # Binary I/O helpers
     fhetch_sim/               # Optional: trace parser + OpenFHE executor
   vendor/

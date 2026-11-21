@@ -103,25 +103,104 @@ set(JSON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/json/single_include"
 # Library sources
 # ==============================================================================
 
-set(LIB_SOURCES
-    src/auto_facade.cpp
-    src/compiler.cpp
+# The recorder-free core: the trace format, the IR builder and the simulator.
+# No niobium::compiler(), no OpenFHE scheme code, no cprobe hooks (the
+# simulator uses OpenFHE's math library only).
+set(CORE_SOURCES
     src/fhetch_api.cpp
     src/fhetch_encoding.cpp
     src/fhetch_parser.cpp
     src/fhetch_reader.cpp
     src/fhetch_writer.cpp
     src/fhetch_sim/simulator.cpp
-    src/local_replay.cpp
-    src/probes.cpp
     src/trace_writer.cpp
 )
+
+# The recorder: the session API niobium::compiler(), the OpenFHE auto-facade,
+# the cprobe hooks, the binding record capture and local replay.
+set(RECORDER_SOURCES
+    src/auto_facade.cpp
+    src/binding_capture.cpp
+    src/compiler.cpp
+    src/fhetch_sync.cpp
+    src/local_replay.cpp
+    src/probes.cpp
+)
+
+# OpenFHE's math library alone (what the simulator uses).
+if(NIOBIUM_FHETCH_OPENFHE_STATIC)
+  set(OPENFHE_CORE_LIBRARY OPENFHEcore_static)
+else()
+  set(OPENFHE_CORE_LIBRARY OPENFHEcore)
+endif()
+
+# ==============================================================================
+# Binding record (.nbbr) and output metadata (.nbom) formats
+# (docs/BINDING_RECORD.md). C++17 and dependency-free, so the recorder always
+# writes them. Binding an upload against them is the server's, not this repo's.
+# ==============================================================================
+
+# niobium_object_archive(<name> <export_name> SOURCES ...): the sources compiled
+# once, as the OBJECT library <name>_objects, and the static archive <name> of
+# those objects, exported as Niobium::<export_name>. libnbfhetch compiles in the
+# same objects, so it (shared or static, and a consumer that links its archive
+# by path) needs no second library, and holds one copy of any process-wide state.
+function(niobium_object_archive name export_name)
+  cmake_parse_arguments(ARG "" "" "SOURCES" ${ARGN})
+  add_library(${name}_objects OBJECT ${ARG_SOURCES})
+  set_target_properties(${name}_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_compile_features(${name}_objects PUBLIC cxx_std_17)
+  target_include_directories(${name}_objects PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+  add_library(${name} STATIC $<TARGET_OBJECTS:${name}_objects>)
+  add_library(Niobium::${export_name} ALIAS ${name})
+  set_target_properties(${name} PROPERTIES
+      OUTPUT_NAME "${name}"
+      EXPORT_NAME "${export_name}"
+      POSITION_INDEPENDENT_CODE ON)
+  target_compile_features(${name} PUBLIC cxx_std_17)
+  target_include_directories(${name} PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:include>)
+endfunction()
+
+niobium_object_archive(nbfhetch_formats fhetch_formats SOURCES
+    src/formats/binding_record.cpp
+    src/formats/file_io.cpp
+    src/formats/output_metadata.cpp
+)
+
+# ==============================================================================
+# Recorder-free core (nbfhetch_core)
+# ==============================================================================
+#
+# The static nbfhetch_core is installed for find_package(NiobiumFhetchCore), so
+# a recorder elsewhere can link the IR builder without a second
+# niobium::compiler(); libnbfhetch therefore holds exactly what it held before.
+
+niobium_object_archive(nbfhetch_core fhetch_core SOURCES ${CORE_SOURCES})
+target_include_directories(nbfhetch_core_objects PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/fhetch_sim
+    ${JSON_INCLUDE_DIR}
+    ${OPENFHE_INCLUDE_DIRS})
+# The same definition libnbfhetch is compiled with, so the OpenFHE headers the
+# simulator includes expand identically in both; it adds no hook reference
+# there (tests/fhetch_core checks the core's undefined symbols).
+target_compile_definitions(nbfhetch_core_objects PRIVATE OPENFHE_CPROBES)
+target_link_libraries(nbfhetch_core_objects PUBLIC nbfhetch_formats)
+
+find_package(Threads REQUIRED)
+target_link_directories(nbfhetch_core PUBLIC $<BUILD_INTERFACE:${OPENFHE_LIBRARY_PATH}>)
+target_link_libraries(nbfhetch_core PUBLIC nbfhetch_formats ${OPENFHE_CORE_LIBRARY} Threads::Threads)
 
 # ==============================================================================
 # Library target
 # ==============================================================================
 
-add_library(niobium_fhetch ${LIB_SOURCES})
+# The core's and the formats' objects plus the recorder (see above for why not
+# their archives).
+add_library(niobium_fhetch ${RECORDER_SOURCES} $<TARGET_OBJECTS:nbfhetch_core_objects>
+    $<TARGET_OBJECTS:nbfhetch_formats_objects>)
 add_library(Niobium::fhetch ALIAS niobium_fhetch)
 
 # Output name: libnbfhetch.so / libnbfhetch.a
@@ -151,7 +230,6 @@ endforeach()
 # Enable OPENFHE_CPROBES so the instrumented branch activates probes
 target_compile_definitions(niobium_fhetch PUBLIC OPENFHE_CPROBES)
 
-find_package(Threads REQUIRED)
 target_link_libraries(niobium_fhetch PRIVATE Threads::Threads)
 
 target_link_directories(niobium_fhetch
@@ -207,41 +285,45 @@ endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS niobium_fhetch
-    EXPORT NiobiumFhetchTargets
-    LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+# Installs the targets into export set <package>Targets, plus that package's
+# Targets file, config (from cmake/<package>Config.cmake.in) and version file,
+# so consumers can find_package(<package>) and use Niobium::<export name>.
+# Package configs are what find_package locates; the Targets file alone is not.
+function(niobium_install_package package)
+  install(TARGETS ${ARGN}
+      EXPORT ${package}Targets
+      LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+      ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+      RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR})
+  set(_dest ${CMAKE_INSTALL_LIBDIR}/cmake/${package})
+  install(EXPORT ${package}Targets
+      FILE        ${package}Targets.cmake
+      NAMESPACE   Niobium::
+      DESTINATION ${_dest})
+  configure_package_config_file(
+      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/${package}Config.cmake.in
+      ${CMAKE_CURRENT_BINARY_DIR}/${package}Config.cmake
+      INSTALL_DESTINATION ${_dest})
+  write_basic_package_version_file(
+      ${CMAKE_CURRENT_BINARY_DIR}/${package}ConfigVersion.cmake
+      VERSION       ${PROJECT_VERSION}
+      COMPATIBILITY SameMajorVersion)
+  install(FILES
+      ${CMAKE_CURRENT_BINARY_DIR}/${package}Config.cmake
+      ${CMAKE_CURRENT_BINARY_DIR}/${package}ConfigVersion.cmake
+      DESTINATION ${_dest})
+endfunction()
+
+# find_package(NiobiumFhetchFormats): Niobium::fhetch_formats, C++17, no deps.
+# NiobiumFhetch depends on it (niobium_fhetch links it PUBLIC).
+niobium_install_package(NiobiumFhetchFormats nbfhetch_formats)
+# find_package(NiobiumFhetchCore): Niobium::fhetch_core, the recorder-free core.
+niobium_install_package(NiobiumFhetchCore nbfhetch_core)
+niobium_install_package(NiobiumFhetch niobium_fhetch)
 
 install(DIRECTORY include/niobium
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.h"
-)
-
-install(EXPORT NiobiumFhetchTargets
-    FILE        NiobiumFhetchTargets.cmake
-    NAMESPACE   Niobium::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/NiobiumFhetch
-)
-
-# Package config + version so external consumers can `find_package(NiobiumFhetch)`
-# (the export above installs only the Targets file, which find_package can't locate
-# on its own).
-configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/NiobiumFhetchConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/NiobiumFhetch
-)
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfigVersion.cmake
-    VERSION       ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/NiobiumFhetchConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/NiobiumFhetch
 )
 
 if(WITH_FHETCH_SIM)

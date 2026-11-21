@@ -1,7 +1,8 @@
 // Copyright 2024-present Niobium Microsystems, Inc.
 // Licensed under the Apache License, Version 2.0.
 
-#include "trace_writer.h"
+#include "niobium/trace_writer.h"
+#include "niobium/fhetch_recording.h"
 
 #include "niobium/fhetch_writer.h"
 
@@ -224,3 +225,12 @@ void TraceWriter::clear() {
 }
 
 }  // namespace niobium
+
+namespace niobium::fhetch::recording {
+
+TraceWriter& trace_writer() {
+    static TraceWriter writer;
+    return writer;
+}
+
+}  // namespace niobium::fhetch::recording

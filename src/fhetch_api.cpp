@@ -7,10 +7,11 @@
 // via the TraceWriter. The server-side niobium-compiler parses the FHETCH
 // trace and lowers it to internal hardware instructions.
 
+#include "niobium/compiler.h"
 #include "niobium/fhetch_api.h"
 #include "niobium/checks.h"
-#include "niobium/compiler.h"
-#include "compiler_internal.h"
+#include "niobium/fhetch_recording.h"
+#include "niobium/trace_writer.h"
 
 #include <atomic>
 #include <cassert>
@@ -18,6 +19,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -29,11 +31,7 @@
 #include <unordered_set>
 #include <vector>
 #include <utility>
-
-namespace niobium::detail {
-// Defined at the bottom of this file with the sync latch it re-arms.
-void rearm_fhetch_sync() noexcept;
-}  // namespace niobium::detail
+#include <variant>
 
 namespace niobium::fhetch {
 
@@ -48,9 +46,9 @@ static uintptr_t alloc_address() {
 }
 
 // ----------------------------------------------------------------------------
-// Address -> modulus map. Populated as sr_* instructions are emitted; used by
-// sync_fhetch_state_to_compiler() to resolve a modulus for each tagged
-// single-residue input before replay().
+// Address -> modulus map. Populated as sr_* instructions are emitted; a
+// recorder reads it (recording::address_moduli()) to resolve a modulus for
+// each tagged single-residue input before replay().
 // ----------------------------------------------------------------------------
 
 static std::unordered_map<uintptr_t, uint64_t>& address_modulus_map() {
@@ -63,7 +61,7 @@ static void remember_modulus(uintptr_t a, uint64_t q) {
     // copy-style sr_addps %d, %s, 0) doesn't describe the polynomial's
     // actual modulus. But we still need *some* entry in the map: tagged
     // inputs that are only used in copy ops would otherwise be dropped
-    // by sync_fhetch_state_to_compiler()'s mod_map.find guard, producing
+    // by the recorder's address_moduli() lookup, producing
     // unloaded live-in addresses at the secondary replay
     // (see tests/double_load reproducer).
     constexpr uint64_t COPY_SENTINEL = 0xFFFFFFFFFFFFFFFFULL;
@@ -86,7 +84,7 @@ static void remember_modulus(uintptr_t a, uint64_t q) {
 
 // Register a modulus and return its table index.
 static uint32_t midx(uint64_t q) {
-    return niobium::detail::trace_writer().register_modulus(q);
+    return niobium::fhetch::recording::trace_writer().register_modulus(q);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +107,7 @@ static Instruction ir(FhOpcode op, uintptr_t d, uintptr_t s1) {
 }
 
 static void emit(const Instruction& inst) {
-    niobium::detail::trace_writer().emit(inst);
+    niobium::fhetch::recording::trace_writer().emit(inst);
 }
 
 /// dest, src1, src2, m=
@@ -167,33 +165,23 @@ static void emit_ntt(FhOpcode op, uintptr_t d, uintptr_t s1, uint64_t q,
 // Probe and input registries
 // ============================================================================
 
-struct ProbeEntry {
-    std::string name;
-    enum Kind { POLY, MRP_KIND, MRPA, SRPA } kind;
-    Polynomial poly;
-    MRP mrp;
-    MRPArray mrpa;
-    SRPArray srpa;
-};
+// One entry per tag_input / tag_output call (fhetch_recording.h).
+using ProbeEntry = recording::TaggedEntry;
+using InputEntry = recording::TaggedEntry;
 
 static std::vector<ProbeEntry>& probe_registry() {
     static std::vector<ProbeEntry> registry;
     return registry;
 }
 
-struct InputEntry {
-    std::string name;
-    enum Kind { POLY, MRP_KIND, MRPA, SRPA } kind;
-    Polynomial poly;
-    MRP mrp;
-    MRPArray mrpa;
-    SRPArray srpa;
-};
-
 static std::vector<InputEntry>& input_registry() {
     static std::vector<InputEntry> registry;
     return registry;
 }
+
+// Bumped whenever the registries are reset, so a recorder that copies them
+// once per cycle (recording::registry_generation()) knows to copy again.
+static std::uint64_t registry_generation_ = 0;
 
 // ============================================================================
 // Impl structs
@@ -541,86 +529,42 @@ void reset_for_epoch() {
     // next_address_ rolls back to 0, so the prior epoch's entries would
     // shadow this epoch's first-write-wins inserts.
     address_modulus_map().clear();
-    // Fresh registries need a fresh sync (see g_synced_since_reset below).
-    niobium::detail::rearm_fhetch_sync();
+    // Fresh registries need a fresh copy by the recorder.
+    ++registry_generation_;
 }
 
 // ============================================================================
 // INPUT / OUTPUT TAGGING
 // ============================================================================
 
-void tag_input(const std::string& name, const Polynomial& p) {
-    InputEntry e; e.name = name; e.kind = InputEntry::POLY; e.poly = p;
-    input_registry().push_back(std::move(e));
-}
-
-void tag_input(const std::string& name, const MRP& m) {
-    InputEntry e; e.name = name; e.kind = InputEntry::MRP_KIND; e.mrp = m;
-    input_registry().push_back(std::move(e));
-}
-
-void tag_input(const std::string& name, const MRPArray& arr) {
-    InputEntry e; e.name = name; e.kind = InputEntry::MRPA; e.mrpa = arr;
-    input_registry().push_back(std::move(e));
-}
-
-void tag_input(const std::string& name, const SRPArray& arr) {
-    InputEntry e; e.name = name; e.kind = InputEntry::SRPA; e.srpa = arr;
-    input_registry().push_back(std::move(e));
-}
+void tag_input(const std::string& name, const Polynomial& p) { input_registry().push_back({name, p}); }
+void tag_input(const std::string& name, const MRP& m) { input_registry().push_back({name, m}); }
+void tag_input(const std::string& name, const MRPArray& arr) { input_registry().push_back({name, arr}); }
+void tag_input(const std::string& name, const SRPArray& arr) { input_registry().push_back({name, arr}); }
 
 void tag_output(const std::string& name, const Polynomial& p) {
-    niobium::detail::trace_writer().comment(
-        "output " + name + " %" + std::to_string(p.impl()->address));
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::POLY; e.poly = p;
-    probe_registry().push_back(std::move(e));
+    recording::trace_writer().comment("output " + name + " %" + std::to_string(p.impl()->address));
+    probe_registry().push_back({name, p});
 }
 
 void tag_output(const std::string& name, const MRP& m) {
     for (auto q : m.base())
-        niobium::detail::trace_writer().comment(
-            "output " + name + " %" + std::to_string(m[q].impl()->address));
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::MRP_KIND; e.mrp = m;
-    probe_registry().push_back(std::move(e));
+        recording::trace_writer().comment("output " + name + " %" + std::to_string(m[q].impl()->address));
+    probe_registry().push_back({name, m});
 }
 
-void tag_output(const std::string& name, const MRPArray& arr) {
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::MRPA; e.mrpa = arr;
-    probe_registry().push_back(std::move(e));
-}
-
-void tag_output(const std::string& name, const SRPArray& arr) {
-    ProbeEntry e; e.name = name; e.kind = ProbeEntry::SRPA; e.srpa = arr;
-    probe_registry().push_back(std::move(e));
-}
+void tag_output(const std::string& name, const MRPArray& arr) { probe_registry().push_back({name, arr}); }
+void tag_output(const std::string& name, const SRPArray& arr) { probe_registry().push_back({name, arr}); }
 
 uint64_t get_input_ring_dimension() {
+    uint64_t ring_dim = 0;
     for (const auto& input : input_registry()) {
-        switch (input.kind) {
-        case InputEntry::POLY:
-            if (input.poly.is_valid() && input.poly.ring_dimension() > 0)
-                return input.poly.ring_dimension();
-            break;
-        case InputEntry::MRP_KIND:
-            if (input.mrp.is_valid() && !input.mrp.base().empty()) {
-                const auto& p = input.mrp[input.mrp.base()[0]];
-                if (p.is_valid() && p.ring_dimension() > 0)
-                    return p.ring_dimension();
-            }
-            break;
-        case InputEntry::MRPA:
-            if (input.mrpa.length() > 0 && input.mrpa[0].is_valid()) {
-                const auto& b = input.mrpa[0].base();
-                if (!b.empty()) return input.mrpa[0][b[0]].ring_dimension();
-            }
-            break;
-        case InputEntry::SRPA:
-            if (input.srpa.length() > 0 && input.srpa[0].is_valid())
-                return input.srpa[0].ring_dimension();
-            break;
-        }
+        recording::for_each_residue(input, [&](const recording::TaggedResidue& r) {
+            if (ring_dim == 0) ring_dim = r.poly->ring_dimension();
+        });
+        if (ring_dim != 0) break;
     }
-    return 0;
+    return ring_dim;
 }
 
 void save_input_data() {
@@ -1577,159 +1521,84 @@ bool load_mrp_array_json(MRPArray& /*arr*/, const std::filesystem::path& /*file*
 }  // namespace niobium::fhetch
 
 // ============================================================================
-// Internal: sync tagged inputs/outputs to the Compiler so replay() can find
-// them. Called from Compiler::replay() before populating the simulator.
+// What a recorder reads (fhetch_recording.h)
 // ============================================================================
 
-namespace niobium::detail {
+namespace niobium::fhetch::recording {
 
-uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p) {
+const std::vector<TaggedEntry>& tagged_inputs() { return input_registry(); }
+const std::vector<TaggedEntry>& tagged_outputs() { return probe_registry(); }
+
+namespace {
+
+template <class... Fs>
+struct Overloaded : Fs... {
+    using Fs::operator()...;
+};
+template <class... Fs>
+Overloaded(Fs...) -> Overloaded<Fs...>;
+
+std::optional<std::uint64_t> known_modulus(const Polynomial& p) {
+    const auto& map = address_modulus_map();
+    const auto it = map.find(p.impl()->address);
+    if (it == map.end()) return std::nullopt;
+    return it->second;
+}
+
+// An MRP's valid residues, in base order; `first` marks whether the first of
+// them starts an element.
+void for_each_mrp_residue(const MRP& m, CapturedKind kind, bool first,
+                          const std::function<void(const TaggedResidue&)>& f) {
+    if (!m.is_valid()) return;
+    for (const auto q : m.base()) {
+        const auto& residue = m[q];
+        if (!residue.is_valid()) continue;
+        f(TaggedResidue{kind, first, &residue, q});
+        first = false;
+    }
+}
+
+}  // namespace
+
+void for_each_residue(const TaggedEntry& entry, const std::function<void(const TaggedResidue&)>& f) {
+    std::visit(Overloaded{
+                   [&](const Polynomial& p) {
+                       if (p.is_valid()) f(TaggedResidue{CapturedKind::SRP, false, &p, known_modulus(p)});
+                   },
+                   [&](const MRP& m) { for_each_mrp_residue(m, CapturedKind::MRP, false, f); },
+                   [&](const MRPArray& arr) {
+                       if (!arr.is_valid()) return;
+                       for (size_t i = 0; i < arr.length(); ++i)
+                           for_each_mrp_residue(arr[i], CapturedKind::MRPArray, true, f);
+                   },
+                   [&](const SRPArray& arr) {
+                       if (!arr.is_valid()) return;
+                       for (size_t i = 0; i < arr.length(); ++i) {
+                           const auto& p = arr[i];
+                           if (p.is_valid()) f(TaggedResidue{CapturedKind::SRPArray, true, &p, known_modulus(p)});
+                       }
+                   },
+               },
+               entry.value);
+}
+
+const std::unordered_map<std::uintptr_t, std::uint64_t>& address_moduli() { return address_modulus_map(); }
+
+void clear_address_moduli() {
+    address_modulus_map().clear();
+    ++registry_generation_;
+}
+
+std::uint64_t registry_generation() { return registry_generation_; }
+
+std::vector<std::uint64_t> values_or_zeros(const Polynomial& p) {
+    if (!p.impl()->int_data.empty()) return p.impl()->int_data;
+    std::vector<std::uint64_t> zeros(p.ring_dimension(), 0);
+    return zeros;
+}
+
+uintptr_t polynomial_address(const Polynomial& p) {
     return p.impl() ? p.impl()->address : static_cast<uintptr_t>(-1);
 }
 
-// One-shot latch for sync_fhetch_state_to_compiler(): both stop() and
-// replay() call it, and a second pass would append duplicate elements to
-// the same captured records (find_or_create_record dedupes records by
-// name, not elements) — doubling every registry-tagged input in memory.
-// Re-armed whenever the registries are reset for a new recording cycle.
-static bool g_synced_since_reset = false;
-
-void rearm_fhetch_sync() noexcept {
-    g_synced_since_reset = false;
-}
-
-// Drops TU-static recording state Compiler::reset can't reach; first-write-wins
-// on address_modulus_map otherwise leaks moduli across resets.
-void clear_recording_registries() noexcept {
-    niobium::fhetch::address_modulus_map().clear();
-    g_synced_since_reset = false;
-}
-
-void sync_fhetch_state_to_compiler() {
-    if (g_synced_since_reset) return;
-    g_synced_since_reset = true;
-
-    using namespace niobium::fhetch;
-    auto& cc = niobium::compiler();
-    const auto& mod_map = address_modulus_map();
-
-    auto data_or_zeros = [](const Polynomial& p) {
-        if (!p.impl()->int_data.empty()) return p.impl()->int_data;
-        return std::vector<uint64_t>(p.ring_dimension(), 0);
-    };
-
-    // ---- Inputs ----
-    for (const auto& e : input_registry()) {
-        switch (e.kind) {
-        case InputEntry::POLY: {
-            if (!e.poly.is_valid()) break;
-            auto it = mod_map.find(e.poly.impl()->address);
-            if (it == mod_map.end()) break;  // never used in a modulus-bearing op
-            cc.store_input_element(e.name, niobium::CapturedKind::SRP,
-                                   /*starts_new_element=*/false,
-                                   e.poly.impl()->address, it->second,
-                                   data_or_zeros(e.poly));
-            break;
-        }
-        case InputEntry::MRP_KIND:
-            if (e.mrp.is_valid()) {
-                for (auto q : e.mrp.base()) {
-                    const auto& res = e.mrp[q];
-                    if (!res.is_valid()) continue;
-                    cc.store_input_element(e.name, niobium::CapturedKind::MRP,
-                                           /*starts_new_element=*/false,
-                                           res.impl()->address, q,
-                                           data_or_zeros(res));
-                }
-            }
-            break;
-        case InputEntry::MRPA:
-            if (e.mrpa.is_valid()) {
-                for (size_t i = 0; i < e.mrpa.length(); ++i) {
-                    const auto& m = e.mrpa[i];
-                    bool first = true;
-                    for (auto q : m.base()) {
-                        const auto& res = m[q];
-                        if (!res.is_valid()) continue;
-                        cc.store_input_element(e.name, niobium::CapturedKind::MRPArray,
-                                               /*starts_new_element=*/first,
-                                               res.impl()->address, q,
-                                               data_or_zeros(res));
-                        first = false;
-                    }
-                }
-            }
-            break;
-        case InputEntry::SRPA:
-            if (e.srpa.is_valid()) {
-                for (size_t i = 0; i < e.srpa.length(); ++i) {
-                    const auto& p = e.srpa[i];
-                    if (!p.is_valid()) continue;
-                    auto it = mod_map.find(p.impl()->address);
-                    if (it == mod_map.end()) continue;
-                    cc.store_input_element(e.name, niobium::CapturedKind::SRPArray,
-                                           /*starts_new_element=*/true,
-                                           p.impl()->address, it->second,
-                                           data_or_zeros(p));
-                }
-            }
-            break;
-        }
-    }
-
-    // ---- Outputs ----
-    // Outputs without a known modulus still get recorded (modulus=0) so
-    // downstream consumers can at least emit a template.
-    auto modulus_for = [&](const Polynomial& p) -> uint64_t {
-        auto it = mod_map.find(p.impl()->address);
-        return (it == mod_map.end()) ? 0 : it->second;
-    };
-
-    for (const auto& e : probe_registry()) {
-        switch (e.kind) {
-        case ProbeEntry::POLY:
-            if (e.poly.is_valid()) {
-                cc.store_output_probe(e.name, niobium::CapturedKind::SRP,
-                                        /*starts_new_element=*/false,
-                                        e.poly.impl()->address, modulus_for(e.poly));
-            }
-            break;
-        case ProbeEntry::MRP_KIND:
-            if (e.mrp.is_valid()) {
-                for (auto q : e.mrp.base()) {
-                    cc.store_output_probe(e.name, niobium::CapturedKind::MRP,
-                                            /*starts_new_element=*/false,
-                                            e.mrp[q].impl()->address, q);
-                }
-            }
-            break;
-        case ProbeEntry::MRPA:
-            if (e.mrpa.is_valid()) {
-                for (size_t i = 0; i < e.mrpa.length(); ++i) {
-                    const auto& m = e.mrpa[i];
-                    bool first = true;
-                    for (auto q : m.base()) {
-                        cc.store_output_probe(e.name, niobium::CapturedKind::MRPArray,
-                                                /*starts_new_element=*/first,
-                                                m[q].impl()->address, q);
-                        first = false;
-                    }
-                }
-            }
-            break;
-        case ProbeEntry::SRPA:
-            if (e.srpa.is_valid()) {
-                for (size_t i = 0; i < e.srpa.length(); ++i) {
-                    const auto& p = e.srpa[i];
-                    if (!p.is_valid()) continue;
-                    cc.store_output_probe(e.name, niobium::CapturedKind::SRPArray,
-                                            /*starts_new_element=*/true,
-                                            p.impl()->address, modulus_for(p));
-                }
-            }
-            break;
-        }
-    }
-}
-
-}  // namespace niobium::detail
+}  // namespace niobium::fhetch::recording

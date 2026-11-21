@@ -42,14 +42,9 @@ namespace niobium {
 /// four overloads in fhetch_api.h.
 enum class CapturedKind : uint8_t { SRP, MRP, SRPArray, MRPArray };
 
-/// Which serialization of the recorded trace to write.
-///
-/// Selected with `--trace-format=<text|binary|both>` on the CLI consumed by
-/// init(); Binary is the default. The two forms describe the same program:
-/// the binary one (`.fhex`) is smaller and faster to read, the text one
-/// (`.fhetch`) is human-readable. Readers tell them apart by content, not
-/// by file name.
-enum class TraceFormat : uint8_t { Text, Binary, Both };
+namespace detail {
+struct BindingFiles;
+}  // namespace detail
 
 /// Per-record shape returned by the for_each_captured_* helpers in
 /// compiler_internal.h. per_element_moduli has size 1 for SRP / MRP
@@ -446,7 +441,7 @@ class Compiler {
                           const std::string &source_path);
 
   private:
-    void write_replay_json();
+    void write_replay_json(const detail::BindingFiles& binding_files);
     void write_replay_outputs();
 
     /// Hand the recorded fhetch project off to the compiler-side

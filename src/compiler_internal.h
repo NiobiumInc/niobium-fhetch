@@ -8,7 +8,7 @@
 #pragma once
 
 #include "niobium/compiler.h"
-#include "trace_writer.h"
+#include "niobium/trace_writer.h"
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -21,16 +21,6 @@ namespace niobium::detail {
 // downstream libraries don't need this private header to consume them.
 using niobium::CapturedInputRecord;
 using niobium::CapturedShape;
-
-/// Get the global TraceWriter instance (owned by the Compiler singleton).
-TraceWriter& trace_writer();
-
-/// Hardware data-format toggles parsed by Compiler::init()
-/// (--montgomery / --bit_reversal / --niobium_hw). Read by fhetch_api.cpp
-/// to select Montgomery-form immediates and the hardware switchmodulus
-/// lowering, and by store_input_element's callers/tests.
-bool montgomery_mode();
-bool bit_reversal_mode();
 
 /// Look up the FHETCH address for an OpenFHE polynomial ID.
 /// Returns (uint64_t)-1 if not found.
@@ -84,19 +74,5 @@ void for_each_captured_input(const std::function<void(const CapturedInputRecord&
 /// materialized at recording time, so name + shape only.
 void for_each_captured_output(
     const std::function<void(const std::string&, const CapturedShape&)>& cb);
-
-}  // namespace niobium::detail
-
-// Forward-declare the opaque Polynomial struct so we can return its
-// synthetic FHETCH address without exposing the full implementation.
-namespace niobium::fhetch { class Polynomial; }
-
-namespace niobium::detail {
-
-/// Retrieve the synthetic FHETCH address assigned to a niobium::fhetch::Polynomial.
-/// Used by translation units (e.g. fhetch_parser.cpp) that need to call
-/// Compiler::store_input_element with the Polynomial's own address without
-/// reaching into PolynomialImpl's internal layout.
-uintptr_t polynomial_address(const niobium::fhetch::Polynomial& p);
 
 }  // namespace niobium::detail

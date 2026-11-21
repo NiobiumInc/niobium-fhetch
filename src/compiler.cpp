@@ -4,9 +4,12 @@
 #include "niobium/compiler.h"
 #include "niobium/producer_version.h"
 #include "niobium/fhetch_api.h"
+#include "niobium/fhetch_ir.h"
 #include "niobium/fhetch_sim/simulator.h"
+#include "binding_files.h"
 #include "compiler_internal.h"
-#include "trace_writer.h"
+#include "niobium/fhetch_recording.h"
+#include "niobium/trace_writer.h"
 #include "niobium/checks.h"
 
 #include <cassert>
@@ -52,9 +55,15 @@ namespace niobium {
 // Compiler::Impl — hidden implementation
 // ============================================================================
 
-struct Compiler::Impl {
-    TraceWriter trace_writer;
+namespace {
 
+// The IR builder's process-wide writer (fhetch_recording.h): the IR builder
+// records into it; the Compiler starts, stops and writes it.
+TraceWriter& trace() { return fhetch::recording::trace_writer(); }
+
+}  // namespace
+
+struct Compiler::Impl {
     // Program metadata
     std::string program_name;
     std::string program_version;
@@ -177,6 +186,10 @@ struct Compiler::Impl {
     // linear-scan when re-tagging an existing record. Kept in sync
     // wherever captured_inputs is mutated.
     std::unordered_map<std::string, size_t> captured_input_index;
+
+    // The binding record and output metadata the auto-facade captures as it
+    // tags inputs, outputs and keys (binding_capture.h); written by stop().
+    detail::BindingCapture binding;
 
     // Output probe addresses captured by probe().
     struct OutputRecord {
@@ -341,7 +354,7 @@ void Compiler::init(int& argc, char** argv) {
         std::cout << "[NIOBIUM] Target: " << impl_->target
                   << " (replay will hand off to nbcc_fhetch_replay)" << std::endl;
     }
-    impl_->trace_writer.set_trace_format(impl_->trace_format);
+    trace().set_trace_format(impl_->trace_format);
     if (impl_->montgomery_mode || impl_->bitrev_mode) {
         std::cout << "[NIOBIUM] Hardware data format:"
                   << (impl_->montgomery_mode ? " montgomery" : "")
@@ -361,12 +374,12 @@ bool Compiler::start() {
 
     // Start each cycle from a clean trace + clean fhetch registries so
     // multi-cycle drivers don't leak prior recordings forward.
-    impl_->trace_writer.clear();
+    trace().clear();
     niobium::fhetch::reset_for_epoch();
 
     impl_->running = true;
     impl_->stopped = false;
-    impl_->trace_writer.start_recording();
+    trace().start_recording();
     std::cout << "[NIOBIUM] Recording started" << std::endl;
     return true;
 }
@@ -377,14 +390,14 @@ bool Compiler::stop() {
     // captured_outputs so write_replay_json picks them up. No-op for the
     // OpenFHE auto-facade flow (it populates captured_outputs directly).
     niobium::detail::sync_fhetch_state_to_compiler();
-    impl_->trace_writer.emit(fhetch::Instruction{fhetch::FH_HALT});
-    impl_->trace_writer.stop_recording();
+    trace().emit(fhetch::Instruction{fhetch::FH_HALT});
+    trace().stop_recording();
     impl_->running = false;
     impl_->stopped = true;
 
     // Write the FHETCH trace file
     auto dir = get_program_directory();
-    impl_->last_trace_path = impl_->trace_writer.write(dir, impl_->full_program_name());
+    impl_->last_trace_path = trace().write(dir, impl_->full_program_name());
 
     // Auto-capture any CC-derived precomputed data (e.g. CKKS bootstrap
     // precompute) before writing the replay index, mirroring the compiler's
@@ -399,24 +412,29 @@ bool Compiler::stop() {
         impl_->post_recording_hook();
     }
 
+    // The binding record and output metadata (docs/BINDING_RECORD.md), so data
+    // from a client that never ran the program (a labelled NBBF upload) can be
+    // bound by label instead of by .ids position, and results rebuilt.
+    const auto binding_files = detail::write_binding_files(impl_->binding, dir, impl_->full_program_name());
+
     // Write fhetch_replay.json with inputs, outputs, and modulus table
-    write_replay_json();
+    write_replay_json(binding_files);
 
     std::cout << "[NIOBIUM] Recording stopped ("
-              << impl_->trace_writer.instruction_count()
+              << trace().instruction_count()
               << " instructions)" << std::endl;
     return true;
 }
 
 bool Compiler::pause() {
     if (!impl_->running) return false;
-    impl_->trace_writer.pause_recording();
+    trace().pause_recording();
     return true;
 }
 
 bool Compiler::resume() {
     if (!impl_->running) return false;
-    impl_->trace_writer.resume_recording();
+    trace().resume_recording();
     return true;
 }
 
@@ -430,7 +448,7 @@ void Compiler::set_program_info(const std::string& name,
     impl_->program_name = name;
     impl_->program_version = version;
     impl_->program_description = description;
-    impl_->trace_writer.set_program_info(name, version, description);
+    trace().set_program_info(name, version, description);
 }
 
 void Compiler::set_build_info(const std::string& file, int line,
@@ -438,7 +456,7 @@ void Compiler::set_build_info(const std::string& file, int line,
     impl_->source_file = file;
     impl_->source_line = line;
     impl_->build_timestamp = timestamp;
-    impl_->trace_writer.set_source_info(file, line, timestamp);
+    trace().set_source_info(file, line, timestamp);
 }
 
 // ============================================================================
@@ -562,17 +580,18 @@ void Compiler::set_post_recording_hook(std::function<void()> fn) {
 }
 
 namespace detail {
-// Defined in fhetch_api.cpp; clears TU-static recording state.
+// Defined in fhetch_sync.cpp; clears the IR builder's recording state.
 void clear_recording_registries() noexcept;
 }  // namespace detail
 
 void Compiler::reset() {
     detail::clear_recording_registries();
+    impl_->binding = {};
     impl_->captured_inputs.clear();
     impl_->captured_input_index.clear();
     impl_->captured_outputs.clear();
     impl_->captured_output_index.clear();
-    impl_->trace_writer.clear();
+    trace().clear();
     impl_->program_dir.clear();
     impl_->last_trace_path.clear();
     impl_->running = false;
@@ -765,17 +784,17 @@ bool Compiler::stop_epoch() {
     if (!impl_->running) return false;
 
     // Finalize the current epoch's trace
-    impl_->trace_writer.emit(fhetch::Instruction{fhetch::FH_HALT});
-    impl_->trace_writer.stop_recording();
+    trace().emit(fhetch::Instruction{fhetch::FH_HALT});
+    trace().stop_recording();
 
     auto epoch_dir = get_program_directory() / ("epoch_" + std::to_string(impl_->epoch_id));
     std::string epoch_name = impl_->full_program_name() + "_epoch_" + std::to_string(impl_->epoch_id);
-    impl_->trace_writer.write(epoch_dir, epoch_name);
+    trace().write(epoch_dir, epoch_name);
 
     // Reset for next epoch
-    impl_->trace_writer.clear();
+    trace().clear();
     impl_->epoch_id++;
-    impl_->trace_writer.start_recording();
+    trace().start_recording();
     return true;
 }
 
@@ -1299,7 +1318,7 @@ bool Compiler::run_local_fhetch_driver() {
 // write_replay_json — serialize inputs, outputs, and metadata for replay
 // ============================================================================
 
-void Compiler::write_replay_json() {
+void Compiler::write_replay_json(const detail::BindingFiles& binding_files) {
     using json = nlohmann::json;
     auto dir = get_program_directory();
     auto path = dir / "fhetch_replay.json";
@@ -1340,7 +1359,7 @@ void Compiler::write_replay_json() {
     // Use the trace writer's modulus table as the authoritative source —
     // it includes all moduli encountered during recording (base chain +
     // key-switching moduli), matching the .fhetch file's modulus_count.
-    const auto& trace_moduli = impl_->trace_writer.modulus_table();
+    const auto& trace_moduli = trace().modulus_table();
     if (!trace_moduli.empty()) {
         cc["modulus_chain"] = trace_moduli;
         cc["modulus_chain_length"] = trace_moduli.size();
@@ -1450,6 +1469,9 @@ void Compiler::write_replay_json() {
             out_out.close();
         }
     }
+
+    if (!binding_files.binding_record.empty()) files["binding_record"] = binding_files.binding_record;
+    if (!binding_files.output_metadata.empty()) files["output_metadata"] = binding_files.output_metadata;
 
     // Key file references. Relative to the project directory (like every
     // other entry) so the project stays relocatable: replay hosts resolve
@@ -1595,6 +1617,8 @@ Compiler::Impl& compiler_impl(Compiler& c) {
     return *c.impl_;
 }
 
+detail::BindingCapture& detail::binding_capture() { return compiler_impl(compiler()).binding; }
+
 }  // namespace niobium
 
 namespace niobium::detail {
@@ -1694,23 +1718,3 @@ void for_each_captured_output(
 
 }  // namespace niobium::detail
 
-// ============================================================================
-// Internal accessor for TraceWriter — used by fhetch_api.cpp and probes.cpp.
-// ============================================================================
-
-namespace niobium::detail {
-
-TraceWriter& trace_writer() {
-    auto& impl = niobium::compiler_impl(niobium::compiler());
-    return impl.trace_writer;
-}
-
-bool montgomery_mode() {
-    return niobium::compiler_impl(niobium::compiler()).montgomery_mode;
-}
-
-bool bit_reversal_mode() {
-    return niobium::compiler_impl(niobium::compiler()).bitrev_mode;
-}
-
-}  // namespace niobium::detail

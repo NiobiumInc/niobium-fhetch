@@ -31,6 +31,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -167,6 +168,11 @@ void openfhe_cporbe_with_openmp(bool /*with_openmp*/) {
 // ============================================================================
 
 #include "compiler_internal.h"
+
+// Binding record capture (docs/BINDING_RECORD.md): each tagged input, probed
+// output and the client's keys, with the addresses their towers got.
+#include "binding_capture.h"
+#include "niobium/binding_record.h"
 
 namespace niobium {
 
@@ -373,14 +379,16 @@ static bool write_ciphertext_template_file(
     return true;
 }
 
-// Helper: collect addr_ids and coefficient data from a ciphertext
+// Helper: collect addr_ids and coefficient data from a ciphertext, and its
+// towers for the binding record.
 static void capture_ciphertext_polys(niobium::Compiler& compiler,
                                      const std::string& name,
                                      const lbcrypto::Ciphertext<DCRTPoly>& ct,
-                                     std::vector<uint64_t>& addr_ids) {
+                                     std::vector<uint64_t>& addr_ids,
+                                     niobium::detail::ObjectTowers& towers) {
     const auto& elements = ct->GetElements();
-    for (const auto& dcrt : elements) {
-        for (const auto& poly : dcrt.GetAllElements()) {
+    for (size_t element = 0; element < elements.size(); ++element) {
+        for (const auto& poly : elements[element].GetAllElements()) {
             uintptr_t poly_id = poly.GetId();
             // Pin + allocate a FHETCH address lazily (matches the
             // compiler's compact_address at tag time).
@@ -391,6 +399,7 @@ static void capture_ciphertext_polys(niobium::Compiler& compiler,
             addr_ids.push_back(fhetch_addr);
 
             uint64_t modulus = poly.GetModulus().ConvertToInt();
+            towers.add(element, modulus, fhetch_addr);
             size_t n = poly.GetLength();
             std::vector<uint64_t> vals(n);
             const auto& vec = poly.GetValues();
@@ -409,7 +418,9 @@ void Compiler::tag_input<lbcrypto::Ciphertext<DCRTPoly>>(
     std::optional<std::filesystem::path> file) {
     // Collect addr_ids and in-memory data
     std::vector<uint64_t> addr_ids;
-    capture_ciphertext_polys(*this, input_name, ct, addr_ids);
+    detail::ObjectTowers towers;
+    capture_ciphertext_polys(*this, input_name, ct, addr_ids, towers);
+    detail::capture_binding_input(input_name, ct, towers);
 
     write_ciphertext_input_files(input_name, ct, addr_ids);
 
@@ -611,16 +622,20 @@ void Compiler::probe<lbcrypto::Ciphertext<DCRTPoly>>(
 
     // Record the FHETCH addresses of the output polynomials.
     const auto& elements = ct->GetElements();
-    for (const auto& dcrt : elements) {
-        for (const auto& poly : dcrt.GetAllElements()) {
+    detail::ObjectTowers towers;
+    for (size_t element = 0; element < elements.size(); ++element) {
+        for (const auto& poly : elements[element].GetAllElements()) {
             uintptr_t poly_id = poly.GetId();
             uint64_t fhetch_addr = detail::lookup_fhetch_address(poly_id);
             if (fhetch_addr == static_cast<uint64_t>(-1)) continue;
             uint64_t modulus = poly.GetModulus().ConvertToInt();
             store_output_probe(var_name, niobium::CapturedKind::SRP,
                                /*starts_new_element=*/false, fhetch_addr, modulus);
+            towers.add(element, modulus, fhetch_addr);
         }
     }
+
+    detail::capture_binding_output(var_name, ct, towers);
 
     // Save ciphertext template for result reconstruction after replay.
     // The template preserves the ciphertext structure (params, format, etc.)
@@ -641,10 +656,14 @@ static bool capture_debug_enabled() {
 // Helper: capture DCRTPoly polynomials — collects addr_ids and stores values.
 // Forces EVALUATION (NTT) form before reading values so the simulator sees
 // the same representation the compiler's reference captures.
+// `on_tower`, when given, also receives each captured tower: its DCRTPoly's
+// index in `polys`, modulus and address.
+using TowerCallback = std::function<void(size_t poly, uint64_t modulus, uint64_t address)>;
 static size_t capture_dcrt_polys(Compiler& compiler,
                                  const std::string& key_name,
                                  const std::vector<DCRTPoly>& polys,
-                                 std::vector<uint64_t>& addr_ids) {
+                                 std::vector<uint64_t>& addr_ids,
+                                 const TowerCallback& on_tower = nullptr) {
     size_t count = 0;
     size_t coeff_count = 0;   // how many polys were in COEFFICIENT form on entry
     size_t zero_count = 0;    // captured polys whose values are all-zero
@@ -707,6 +726,7 @@ static size_t capture_dcrt_polys(Compiler& compiler,
             }
 
             compiler.store_input_element(key_name, niobium::CapturedKind::SRP, /*starts_new_element=*/false, fhetch_addr, modulus, vals);
+            if (on_tower) on_tower(di, modulus, fhetch_addr);
             count++;
         }
     }
@@ -855,22 +875,40 @@ static void serialize_eval_keys(
 
 template<>
 void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
-    const lbcrypto::CryptoContext<DCRTPoly>& /*cc*/) {
+    const lbcrypto::CryptoContext<DCRTPoly>& cc) {
     auto dir = get_program_directory();
     std::filesystem::create_directories(dir);
     std::string prog = program_name();
     size_t total = 0;
 
-    // EvalMult keys
+    // Captures one key's A then B vector (the .ids order) and, for a key of the
+    // client's tag, records it in the binding record under `label`.
+    const auto client_tag = detail::binding_key_tag();
+    const auto capture_key = [&](const char* name, const std::string& tag, const lbcrypto::EvalKey<DCRTPoly>& key,
+                                 std::vector<uint64_t>& addr_ids, const std::string& label) {
+        const bool bind = client_tag && tag == *client_tag;
+        detail::ObjectTowers towers;
+        const auto collect = [&](detail::KeyVector vector) -> TowerCallback {
+            if (!bind) return nullptr;
+            return [&towers, vector](size_t digit, uint64_t modulus, uint64_t address) {
+                towers.add(detail::key_big_poly(vector, digit), modulus, address);
+            };
+        };
+        total += capture_dcrt_polys(*this, name, key->GetAVector(), addr_ids, collect(detail::KeyVector::A));
+        total += capture_dcrt_polys(*this, name, key->GetBVector(), addr_ids, collect(detail::KeyVector::B));
+        if (bind) detail::capture_binding_key(cc, label, key, towers);
+    };
+
+    // EvalMult keys. Entry i relinearizes the s^(i+2) component (EvalMultKeysGen).
     try {
         const auto& allMultKeys = lbcrypto::CryptoContextImpl<DCRTPoly>::GetAllEvalMultKeys();
         std::vector<uint64_t> mk_addr_ids;
         std::vector<lbcrypto::EvalKey<DCRTPoly>> all_mk;
         for (const auto& [keyTag, keyVec] : allMultKeys) {
-            for (const auto& evalKey : keyVec) {
-                total += capture_dcrt_polys(*this, "evalmult_key", evalKey->GetAVector(), mk_addr_ids);
-                total += capture_dcrt_polys(*this, "evalmult_key", evalKey->GetBVector(), mk_addr_ids);
-                all_mk.push_back(evalKey);
+            for (size_t i = 0; i < keyVec.size(); ++i) {
+                capture_key("evalmult_key", keyTag, keyVec[i], mk_addr_ids,
+                            binding::relin_key_label(static_cast<uint32_t>(i + 2)));
+                all_mk.push_back(keyVec[i]);
             }
         }
         if (!all_mk.empty()) {
@@ -889,8 +927,7 @@ void Compiler::tag_keys<lbcrypto::CryptoContext<DCRTPoly>>(
         for (const auto& [keyTag, keyMap] : allAutoKeys) {
             if (!keyMap) continue;
             for (const auto& [idx, evalKey] : *keyMap) {
-                total += capture_dcrt_polys(*this, "automorphism_key", evalKey->GetAVector(), rk_addr_ids);
-                total += capture_dcrt_polys(*this, "automorphism_key", evalKey->GetBVector(), rk_addr_ids);
+                capture_key("automorphism_key", keyTag, evalKey, rk_addr_ids, binding::galois_key_label(idx));
                 all_rk.push_back(evalKey);
             }
         }

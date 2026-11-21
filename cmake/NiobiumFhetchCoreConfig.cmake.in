@@ -1,0 +1,18 @@
+@PACKAGE_INIT@
+
+# Niobium::fhetch_core: the recorder-free FHETCH core -- the trace format
+# (fhetch_encoding.h, fhetch_reader.h, fhetch_writer.h, fhetch_parser.h,
+# trace_writer.h), the IR builder (fhetch_api.h, fhetch_ir.h, and
+# fhetch_recording.h for a recorder) and the simulator (fhetch_sim/simulator.h).
+# No niobium::compiler(). C++17.
+#
+# The simulator links OpenFHE's math library (OPENFHEcore), found here so that
+# name resolves to OpenFHE's imported target; the binding formats package
+# installs beside this one.
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(OpenFHE)
+find_dependency(NiobiumFhetchFormats HINTS "${CMAKE_CURRENT_LIST_DIR}/../NiobiumFhetchFormats")
+
+include("${CMAKE_CURRENT_LIST_DIR}/NiobiumFhetchCoreTargets.cmake")
+check_required_components(NiobiumFhetchCore)
