@@ -19,11 +19,11 @@
  *     rec.add_object(make_label(Kind::Input, "x"), Kind::Input, 2, limbs);
  *     rec.write("program.nbbr");
  *
- * Server side: BindingRecord::read("program.nbbr"), then bind an upload with
- * niobium/binding.h.
+ * Server side: BindingRecord::read("program.nbbr"), then bind an upload against
+ * it (docs/BINDING_RECORD.md, Bind).
  *
  * C++17 and dependency-free: the nbfhetch_formats library, which the recorder
- * links. Bind lives in nbfhetch_binding (C++20, needs nbbf).
+ * links.
  */
 #pragma once
 

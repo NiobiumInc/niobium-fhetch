@@ -137,7 +137,7 @@ endif()
 # ==============================================================================
 # Binding record (.nbbr) and output metadata (.nbom) formats
 # (docs/BINDING_RECORD.md). C++17 and dependency-free, so the recorder always
-# writes them; bind (nbfhetch_binding, below) is the opt-in C++20/nbbf part.
+# writes them. Binding an upload against them is the server's, not this repo's.
 # ==============================================================================
 
 # niobium_object_archive(<name> <export_name> SOURCES ...): the sources compiled
@@ -321,12 +321,9 @@ niobium_install_package(NiobiumFhetchFormats nbfhetch_formats)
 niobium_install_package(NiobiumFhetchCore nbfhetch_core)
 niobium_install_package(NiobiumFhetch niobium_fhetch)
 
-# Every public header but binding.h, which needs nbbf and is installed with
-# nbfhetch_binding.
 install(DIRECTORY include/niobium
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.h"
-    PATTERN "binding.h" EXCLUDE
 )
 
 if(WITH_FHETCH_SIM)
@@ -337,30 +334,6 @@ endif()
 # ==============================================================================
 # Examples (optional)
 # ==============================================================================
-
-# ==============================================================================
-# Bind (nbfhetch_binding): joins a labelled NBBF upload with a binding record.
-# C++20 and nbbf, so opt-in: pass -DNIOBIUM_FHETCH_WITH_NBBF=ON and
-# -Dnbbf_DIR=<prefix>/lib/cmake/nbbf (the Makefile's NBBF_DIR does both).
-# find_package(NiobiumFhetchBinding): Niobium::fhetch_binding.
-# ==============================================================================
-
-option(NIOBIUM_FHETCH_WITH_NBBF "Build bind (nbfhetch_binding); needs nbbf" OFF)
-if(NIOBIUM_FHETCH_WITH_NBBF)
-  find_package(nbbf 1.0 REQUIRED)
-  add_library(nbfhetch_binding src/binding/bind.cpp)
-  add_library(Niobium::fhetch_binding ALIAS nbfhetch_binding)
-  set_target_properties(nbfhetch_binding PROPERTIES
-      OUTPUT_NAME "nbfhetch_binding"
-      EXPORT_NAME "fhetch_binding"
-      VERSION     ${PROJECT_VERSION}
-      SOVERSION   1
-      POSITION_INDEPENDENT_CODE ON)
-  target_compile_features(nbfhetch_binding PUBLIC cxx_std_20)
-  target_link_libraries(nbfhetch_binding PUBLIC nbfhetch_formats nbbf::nbbf)
-  niobium_install_package(NiobiumFhetchBinding nbfhetch_binding)
-  install(FILES include/niobium/binding.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/niobium)
-endif()
 
 option(NIOBIUM_FHETCH_WITH_EXAMPLES "Build FHETCH examples" OFF)
 

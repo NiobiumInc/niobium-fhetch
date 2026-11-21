@@ -71,12 +71,6 @@ endif
 
 CMAKE_JSON_INCLUDE_DIR_FLAG := $(if $(JSON_INCLUDE_DIR),-DJSON_INCLUDE_DIR=$(JSON_INCLUDE_DIR))
 
-# NBBF install prefix (find_package(nbbf)). Set it to build bind
-# (nbfhetch_binding) and its test; unset, they are left out. The binding record
-# and output metadata formats (nbfhetch_formats) need no nbbf and are always built.
-NBBF_DIR ?=
-CMAKE_NBBF_FLAG := $(if $(NBBF_DIR),-DNIOBIUM_FHETCH_WITH_NBBF=ON -Dnbbf_DIR=$(NBBF_DIR)/lib/cmake/nbbf)
-
 OPENMP    ?= OFF
 NATIVEOPT ?= OFF
 
@@ -174,7 +168,6 @@ config-fhetch: ## Configure the fhetch library + examples + tests (Debug, requir
 		-DCMAKE_BUILD_TYPE=Debug \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
 		$(CMAKE_JSON_INCLUDE_DIR_FLAG) \
-		$(CMAKE_NBBF_FLAG) \
 		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
 		-DNIOBIUM_FHETCH_WITH_TESTS=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
@@ -185,7 +178,6 @@ config-fhetch-release: ## Configure the fhetch library + examples + tests (Relea
 		-DCMAKE_BUILD_TYPE=Release \
 		-DOPENFHE_INSTALL_DIR=$(OPENFHE_INSTALL_DIR) \
 		$(CMAKE_JSON_INCLUDE_DIR_FLAG) \
-		$(CMAKE_NBBF_FLAG) \
 		-DNIOBIUM_FHETCH_WITH_EXAMPLES=ON \
 		-DNIOBIUM_FHETCH_WITH_TESTS=ON \
 		-DCMAKE_INSTALL_PREFIX=$(FHETCH_INSTALL_DIR)
@@ -427,14 +419,6 @@ test-binding-formats-release: build-release ## Binding record + output metadata 
 test-binding-capture-release: build-release ## The recorder writes <prog>.nbbr and <prog>.nbom next to the trace (Release)
 	$(call set-build-config,Release,build)
 	$(BUILD_DIR)/tests/binding_capture_test
-
-test-binding-bind-release: build-release ## Bind and output limbs (Release; needs NBBF_DIR)
-	$(call set-build-config,Release,build)
-	@if [ ! -x $(BUILD_DIR)/tests/binding_bind_test ]; then \
-		echo "[test-binding-bind-release] binding_bind_test not built: configure with NBBF_DIR=<nbbf prefix>"; \
-		exit 2; \
-	fi
-	$(BUILD_DIR)/tests/binding_bind_test
 
 test-replay-out-release: build-release ## replay_project scopes nbcc_fhetch_replay's --out to the project dir (Release)
 	$(call set-build-config,Release,build)

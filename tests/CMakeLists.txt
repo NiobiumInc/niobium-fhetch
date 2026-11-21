@@ -168,12 +168,3 @@ add_executable(binding_capture_test binding_capture/test.cpp)
 target_link_libraries(binding_capture_test PRIVATE niobium_fhetch)
 target_include_directories(binding_capture_test PRIVATE "${CMAKE_SOURCE_DIR}/src" ${JSON_INCLUDE_DIR})
 set_openfhe_rpath(binding_capture_test)
-
-# ==============================================================================
-# Bind and output limbs (needs NIOBIUM_FHETCH_WITH_NBBF). C++20, no OpenFHE.
-# ==============================================================================
-
-if(TARGET nbfhetch_binding)
-  add_executable(binding_bind_test binding_record/bind_test.cpp)
-  target_link_libraries(binding_bind_test PRIVATE nbfhetch_binding)
-endif()
